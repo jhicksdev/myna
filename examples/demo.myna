@@ -1,0 +1,32 @@
+<asyncio
+
+$$Task(id:i,title:s,priority:i=1,done:b=F){
+  @summary->s{
+    status=.done?"DONE":"TODO"
+    ^`[{status}] #{.id} (p{.priority}): {.title}`
+  }
+}
+
+~@process_pending(tasks:[Task],min_priority:i=1)->[s]{
+  !{
+    ~asyncio.sleep(0.001)
+    filtered=[t|t<-tasks?!t.done&&t.priority>=min_priority]
+    ordered=@srt(filtered,key=t=>-t.priority)
+    ^[t.summary()|t<-ordered]
+  }!!e{
+    p(`Error: {e}`)
+    ^[]
+  }
+}
+
+@main{
+  tasks=[
+    Task(1,"Design grammar",3,T),
+    Task(2,"Build Myna parser",5,F),
+    Task(3,"Write tests",4,F),
+    Task(4,"Future JS target",2,F)
+  ]
+  %line<-asyncio.run(process_pending(tasks,2)){
+    p(line)
+  }
+}

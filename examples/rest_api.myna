@@ -1,0 +1,163 @@
+<json,threading
+<http.server:{HTTPServer,BaseHTTPRequestHandler}
+<urllib.parse:{urlparse,parse_qs}
+<urllib.request:{Request,urlopen}
+<urllib.error:HTTPError
+
+$$Todo(id:i,title:s,done:b=F,priority:i=1){
+  @to_dict->{s:A}=>{.id,.title,.done,.priority}
+}
+
+$TodoStore{
+  @init{.items:{i:Todo}={};.next_id:i=1;.lock=threading.Lock()}
+  @list_all(done:b?=N)->[{s:A}]{
+    !&.lock{
+      items=@srt(.items.values(),key=t=>t.id)
+      ^[t.to_dict()|t<-items?done===N||t.done==done]
+    }
+  }
+  @get(tid:i)->Todo?{!&.lock=>^.items.get(tid)}
+  @create(title:s,priority:i=1,done:b=F)->Todo{
+    !&.lock{
+      todo=Todo(.next_id,title,done,priority)
+      .items[.next_id]=todo;.next_id+=1;^todo
+    }
+  }
+  @delete(tid:i)->b{
+    !&.lock{
+      ?tid<-.items{~.items[tid];^T}
+      ^F
+    }
+  }
+}
+
+STORE=TodoStore()
+
+$TodoHandler<BaseHTTPRequestHandler{
+  @log_message(fmt:s,*args){_}
+
+  @_send_json(status:i,payload:A){
+    body=@u8(@J(payload))
+    .send_response(status)
+    .send_header("Content-Type","application/json")
+    .send_header("Content-Length",@str(#body))
+    .end_headers()
+    .wfile.write(body)
+  }
+
+  @_read_json->{s:A}{
+    length=@int(.headers$?Content_Length??.headers.get("Content-Length","0"))
+    ?length<=0=>^{}
+    ^@j(.rfile.read(length))
+  }
+
+  @_parse_route->(s,i?){
+    parts=[seg|seg<-urlparse(.path).path.split("/")?seg!=""]
+    ?#parts==1&&parts[0]=="todos"{^"collection",N}
+    :?#parts==2&&parts[0]=="todos"{
+      !{^"item",@int(parts[1])}!!:ValueError=>^"invalid_id",N
+    }
+    ^"not_found",N
+  }
+
+  @do_GET{
+    kind,tid=._parse_route()
+    ??kind{
+      "collection"=>{
+        qs=parse_qs(urlparse(.path).query)
+        done_filter="done"<-qs?(qs$done[0].lower()<-("1","true","yes")):N
+        ._send_json(200,todos:STORE.list_all(done_filter))
+      }
+      "item"=>{
+        todo=STORE.get(tid)
+        ?todo!==N{._send_json(200,todo.to_dict())}
+        :{._send_json(404,error:`Todo {tid} not found`)}
+      }
+      "invalid_id"=>._send_json(400,error:"Invalid todo ID")
+      _=>._send_json(404,error:"Route not found")
+    }
+  }
+
+  @do_POST{
+    kind,_=._parse_route()
+    ?kind!="collection"{._send_json(404,error:"Route not found");^}
+    !{data=._read_json()}!!:json.JSONDecodeError{._send_json(400,error:"Invalid JSON body");^}
+    title=@str(data$?title??"").strip()
+    ?title==""{._send_json(400,error:"Field 'title' is required");^}
+    !{priority=@int(data$?priority??1)}!!:ValueError{._send_json(400,error:"Field 'priority' must be an integer");^}
+    todo=STORE.create(title,priority,@bool(data$?done??F))
+    ._send_json(201,todo.to_dict())
+  }
+
+  @do_DELETE{
+    kind,tid=._parse_route()
+    ??kind{
+      "item"=>?STORE.delete(tid){._send_json(200,deleted:tid)}:{._send_json(404,error:`Todo {tid} not found`)}
+      "invalid_id"=>._send_json(400,error:"Invalid todo ID")
+      _=>._send_json(404,error:"Route not found")
+    }
+  }
+}
+
+@request_json(base_url:s,method:s,path:s,body:A=N)->(i,{s:A}){
+  data=body!==N?@u8(@J(body)):N
+  headers=body!==N?{"Content-Type":"application/json"}:{}
+  !{
+    !&resp=urlopen(Request(`{base_url}{path}`,=data,=headers,=method))=>^resp.status,@j(resp.read())
+  }!!e:HTTPError=>^e.code,@j(e.read())
+}
+
+@main{
+  server=HTTPServer(("127.0.0.1",0),TodoHandler)
+  base=`http://127.0.0.1:{server.server_port}`
+  thread=threading.Thread(target=server.serve_forever,daemon=T)
+  thread.start()
+  p(`Server started on {base}`)
+
+  !{
+    st,res=request_json(base,"GET","/todos")
+    !?st==200&&res$todos==[],"Expected empty list"
+    p(`GET /todos -> {st}: {res}`)
+
+    st1,t1=request_json(base,"POST","/todos",title:"Write Myna REST API",priority:5)
+    !?st1==201&&t1$id==1&&t1$title=="Write Myna REST API","Create 1 failed"
+    p(`POST /todos -> {st1}: {t1}`)
+
+    st2,t2=request_json(base,"POST","/todos",title:"Verify token savings",priority:3,done:T)
+    !?st2==201&&t2$id==2&&t2$done===T,"Create 2 failed"
+    p(`POST /todos -> {st2}: {t2}`)
+
+    st_err,err_body=request_json(base,"POST","/todos",title:"   ")
+    !?st_err==400&&"error"<-err_body,"Expected 400 on blank title"
+    p(`POST /todos (invalid) -> {st_err}: {err_body}`)
+
+    st_all,all_res=request_json(base,"GET","/todos")
+    !?st_all==200&&#all_res$todos==2,"Expected 2 todos"
+    p(`GET /todos -> {st_all}: count={#all_res$todos}`)
+
+    st_done,done_res=request_json(base,"GET","/todos?done=true")
+    !?st_done==200&&#done_res$todos==1&&done_res$todos[0]$id==2,"Filter failed"
+    p(`GET /todos?done=true -> {st_done}: {done_res$todos}`)
+
+    st_get,got=request_json(base,"GET","/todos/1")
+    !?st_get==200&&got$title=="Write Myna REST API","Get 1 failed"
+    p(`GET /todos/1 -> {st_get}: {got}`)
+
+    st_404,err_404=request_json(base,"GET","/todos/999")
+    !?st_404==404,"Expected 404 for missing todo"
+    p(`GET /todos/999 -> {st_404}: {err_404}`)
+
+    st_del,del_res=request_json(base,"DELETE","/todos/1")
+    !?st_del==200&&del_res$deleted==1,"Delete 1 failed"
+    p(`DELETE /todos/1 -> {st_del}: {del_res}`)
+
+    st_del2,del_err=request_json(base,"DELETE","/todos/1")
+    !?st_del2==404,"Expected 404 on second delete"
+    p(`DELETE /todos/1 (again) -> {st_del2}: {del_err}`)
+
+    p("All REST API self-tests passed!")
+  }!:{
+    server.shutdown();server.server_close();thread.join(timeout=2.0)
+    p("Server shut down cleanly.")
+  }
+}

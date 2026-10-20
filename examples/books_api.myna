@@ -1,0 +1,76 @@
+<json,threading
+<http.server:{HTTPServer,BaseHTTPRequestHandler}
+<urllib.parse:{urlparse,parse_qs}
+<urllib.request:{Request,urlopen}
+<urllib.error:HTTPError
+$$Book(id:i,title:s,author:s,year:i=2026,available:b=T){@to_dict->{s:A}=>{.id,.title,.author,.year,.available}}
+$BookCatalog{
+@init{.items:{i:Book}={};.nid:i=1;.lk=threading.Lock()}
+@list_all(a:s?=N,v:b?=N)->[{s:A}]{!&.lk{bs=@srt(.items.values(),key=b=>b.id);^[b.to_dict()|b<-bs?(a===N||a.lower()<-b.author.lower())&&(v===N||b.available==v)]}}
+@get(i:i)->Book?{!&.lk=>^.items.get(i)}
+@create(t:s,a:s,y:i=2026,v:b=T)->Book{!&.lk{b=Book(.nid,t,a,y,v);.items[.nid]=b;.nid+=1;^b}}
+@update(i:i,d:{s:A})->Book?{!&.lk{b=.items.get(i);?b===N=>^N;?"title"<-d=>b.title=@str(d$title).strip();?"author"<-d=>b.author=@str(d$author).strip();?"year"<-d=>b.year=@int(d$year);?"available"<-d=>b.available=@bool(d$available);^b}}
+@delete(i:i)->b{!&.lk{?i<-.items{~.items[i];^T};^F}}
+}
+CATALOG=BookCatalog()
+$BookHandler<BaseHTTPRequestHandler{
+@log_message(f:s,*a){_}
+@_json(c:i,d:A){b=@u8(@J(d));.send_response(c);.send_header("Content-Type","application/json");.send_header("Content-Length",@str(#b));.end_headers();.wfile.write(b)}
+@_body->{s:A}{n=@int(.headers.get("Content-Length","0"));?n<=0=>^{};^@j(.rfile.read(n))}
+@_route->(s,i?){ps=[x|x<-urlparse(.path).path.split("/")?x!=""];?#ps==1&&ps[0]=="books"{^"col",N}:?#ps==2&&ps[0]=="books"{!{^"item",@int(ps[1])}!!:ValueError=>^"bad_id",N};^"missing",N}
+@do_GET{
+k,i=._route()
+??k{
+"col"=>{q=parse_qs(urlparse(.path).query);af="author"<-q?q$author[0]:N;av="available"<-q?(q$available[0].lower()<-("1","true","yes")):N;._json(200,books:CATALOG.list_all(af,av))}
+"item"=>{b=CATALOG.get(i);?b!==N{._json(200,b.to_dict())}:{._json(404,error:`Book {i} not found`)}}
+"bad_id"=>._json(400,error:"Invalid book ID")
+_=>._json(404,error:"Route not found")
+}
+}
+@do_POST{
+k,_=._route();?k!="col"{._json(404,error:"Route not found");^}
+!{d=._body()}!!:json.JSONDecodeError{._json(400,error:"Invalid JSON");^}
+t=@str(d$?title??"").strip();a=@str(d$?author??"").strip()
+?t==""||a==""{._json(400,error:"Fields 'title' and 'author' are required");^}
+!{y=@int(d$?year??2026)}!!:ValueError{._json(400,error:"Field 'year' must be an integer");^}
+._json(201,CATALOG.create(t,a,y,@bool(d$?available??T)).to_dict())
+}
+@do_PATCH{
+k,i=._route();?k=="bad_id"{._json(400,error:"Invalid book ID");^}:?k!="item"{._json(404,error:"Route not found");^}
+!{d=._body()}!!:json.JSONDecodeError{._json(400,error:"Invalid JSON");^}
+?"title"<-d&&@str(d$title).strip()==""{._json(400,error:"Title cannot be empty");^}
+!{b=CATALOG.update(i,d)}!!:ValueError{._json(400,error:"Invalid field type");^}
+?b!==N{._json(200,b.to_dict())}:{._json(404,error:`Book {i} not found`)}
+}
+@do_DELETE{
+k,i=._route()
+??k{
+"item"=>?CATALOG.delete(i){._json(200,deleted:i)}:{._json(404,error:`Book {i} not found`)}
+"bad_id"=>._json(400,error:"Invalid book ID")
+_=>._json(404,error:"Route not found")
+}
+}
+}
+@req(u:s,method:s,q:s,b:A=N)->(i,{s:A}){
+data=b!==N?@u8(@J(b)):N;headers=b!==N?{"Content-Type":"application/json"}:{}
+!{!&r=urlopen(Request(`{u}{q}`,=data,=headers,=method))=>^r.status,@j(r.read())}!!e:HTTPError=>^e.code,@j(e.read())
+}
+@main{
+s=HTTPServer(("127.0.0.1",0),BookHandler);u=`http://127.0.0.1:{s.server_port}`
+t=threading.Thread(target=s.serve_forever,daemon=T);t.start()
+!{
+c,r=req(u,"GET","/books");!?c==200&&r$books==[],"Empty catalog"
+c1,b1=req(u,"POST","/books",title:"The Art of Doing Science and Engineering",author:"Richard Hamming",year:1997);!?c1==201&&b1$id==1&&b1$available===T,"Create b1"
+c2,b2=req(u,"POST","/books",title:"Crafting Interpreters",author:"Robert Nystrom",year:2021);!?c2==201&&b2$id==2&&b2$author=="Robert Nystrom","Create b2"
+ce,re=req(u,"POST","/books",title:"",author:"Anon");!?ce==400&&"error"<-re,"Reject blank title"
+ca,ra=req(u,"GET","/books?author=hamming");!?ca==200&&#ra$books==1&&ra$books[0]$id==1,"Author filter"
+cp,bp=req(u,"PATCH","/books/1",available:F);!?cp==200&&bp$available===F,"Checkout b1"
+cv,rv=req(u,"GET","/books?available=true");!?cv==200&&#rv$books==1&&rv$books[0]$id==2,"Available filter"
+cg,bg=req(u,"GET","/books/1");!?cg==200&&bg$available===F,"Get b1"
+cm,_=req(u,"GET","/books/99");!?cm==404,"Missing book 404"
+cb,_=req(u,"PATCH","/books/abc",available:T);!?cb==400,"Bad id 400"
+cd,rd=req(u,"DELETE","/books/1");!?cd==200&&rd$deleted==1,"Delete b1"
+cd2,_=req(u,"DELETE","/books/1");!?cd2==404,"Repeat delete 404"
+p(`Book Catalog API tests passed on {u} (remaining={#rv$books})`)
+}!:{s.shutdown();s.server_close();t.join(timeout=2.0)}
+}

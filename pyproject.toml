@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "myna-lang"
+version = "0.2.0"
+description = "Myna: An AI-friendly, token-efficient symbolic language that transpiles to/from Python and JavaScript"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+myna = "myna.cli:main"
