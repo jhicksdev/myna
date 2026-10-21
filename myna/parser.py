@@ -123,8 +123,51 @@ class Parser:
     # Statements
     # ========================================================================
 
+    def _combine_definition_sigil(self) -> None:
+        """Join adjacent definition sigils that follow a same-line `}`.
+
+        The lexer only emits `+@`, `*@`, `~@`, etc. at obvious statement
+        starts. After a closing block brace on the same line it emits the
+        operator and `@`/`$` separately; this restores the combined token when
+        they are adjacent and a definition follows.
+        """
+        tok = self.cur()
+        combined: Optional[TT] = None
+        extra = 0
+        if tok.type == TT.PLUS:
+            nxt = self.peek()
+            if not nxt.preceded_by_space and nxt.type in (TT.AT, TT.DOLLAR):
+                combined = TT.PLUS_AT if nxt.type == TT.AT else TT.PLUS_DOLLAR
+                extra = 1
+        elif tok.type == TT.STAR:
+            nxt = self.peek()
+            if not nxt.preceded_by_space and nxt.type == TT.AT:
+                combined = TT.STAR_AT
+                extra = 1
+        elif tok.type == TT.TILDE:
+            nxt = self.peek()
+            if not nxt.preceded_by_space and nxt.type == TT.AT:
+                combined = TT.TILDE_AT
+                extra = 1
+            elif not nxt.preceded_by_space and nxt.type == TT.STAR:
+                after = self.peek(2)
+                if not after.preceded_by_space and after.type == TT.AT:
+                    combined = TT.TILDE_STAR_AT
+                    extra = 2
+
+        if combined is not None:
+            self.tokens[self.pos] = Token(
+                combined,
+                tok.value + "".join(t.value for t in self.tokens[self.pos + 1 : self.pos + 1 + extra]),
+                tok.line,
+                tok.col,
+                tok.preceded_by_space,
+            )
+            del self.tokens[self.pos + 1 : self.pos + 1 + extra]
+
     def parse_stmt(self, decorators: Optional[list[ast.Expr]] = None) -> ast.Stmt:
         self.skip_seps()
+        self._combine_definition_sigil()
         tok = self.cur()
 
         # Decorators: #[dec1, dec2]

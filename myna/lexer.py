@@ -436,7 +436,7 @@ def tokenize(source: str) -> list[Token]:
             i += 1
             col += 1
             had_space = False
-            at_stmt_start = tt in (TT.SEMI, TT.LBRACE, TT.RBRACE)
+            at_stmt_start = tt in (TT.SEMI, TT.LBRACE)
             continue
 
         raise LexError(f"Unexpected character {ch!r}", line, col)

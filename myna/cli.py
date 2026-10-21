@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (LexError, ParseError, DecompileError) as exc:
+    except (LexError, ParseError, DecompileError, OSError) as exc:
         print(f"myna: {exc}", file=sys.stderr)
         return 1
 

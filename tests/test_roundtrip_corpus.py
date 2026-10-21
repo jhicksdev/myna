@@ -164,12 +164,12 @@ def biggest(a, b):
     (
         "tuple_if_condition",
         """
-def truthy(pair):
-    if pair:
+def truthy(first, second):
+    if (first, second):
         return 1
     return 0
 """,
-        "truthy((1, 2))",
+        "truthy(0, 1)",
     ),
     (
         "tuple_membership_arrow_body",

@@ -782,13 +782,17 @@ class PythonDecompiler:
                 return "_"
             if pat.pattern is None and pat.name is not None:
                 return pat.name
+            # `pattern as name` has no Myna expression equivalent.
+            raise DecompileError(pat, "capture pattern (`as`) is not supported")
         if isinstance(pat, py_ast.MatchValue):
             return self.dec_expr(pat.value)
         if isinstance(pat, py_ast.MatchSingleton):
             if pat.value is None:
                 return "N"
             return "T" if pat.value else "F"
-        raise DecompileError(pat, f"unsupported pattern: {type(pat).__name__}")
+        # Sequence/mapping/or/star/class patterns use syntax that Myna's
+        # expression patterns already accept.
+        return py_ast.unparse(pat)
 
     def dec_for_stmt(self, stmt: py_ast.For | py_ast.AsyncFor) -> str:
         kw = "%~" if isinstance(stmt, py_ast.AsyncFor) else "%"
