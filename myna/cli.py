@@ -8,7 +8,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from myna import DecompileError, LexError, ParseError, myna_to_python, myna_to_js, python_to_myna
+from myna import DecompileError, LexError, ParseError, TargetError, myna_to_python, myna_to_js, parse, python_to_myna
+import myna.ast_nodes as ast
+from myna.targets import expand_target_blocks
 
 
 def count_tokens(text: str) -> tuple[int, str]:
@@ -131,6 +133,39 @@ def cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_targets(args: argparse.Namespace) -> int:
+    src = Path(args.input).read_text(encoding="utf-8") if args.input != "-" else sys.stdin.read()
+    mod = parse(src)
+    declared = ", ".join(sorted(mod.targets)) if mod.targets else "(none)"
+    print(f"=== Target Report ({args.input}) ===")
+    print(f"Declared : {declared}")
+
+    for target, compile_fn in (("py", myna_to_python), ("js", myna_to_js)):
+        try:
+            compile_fn(src)
+        except TargetError as exc:
+            print(f"{target:<9}: unsupported — {exc}")
+            continue
+        except (LexError, ParseError, ValueError) as exc:
+            print(f"{target:<9}: unsupported — {type(exc).__name__}: {exc}")
+            continue
+
+        imports = [
+            alias.name
+            for stmt in expand_target_blocks(mod, target).body
+            for alias in (stmt.names if isinstance(stmt, (ast.ImportStmt, ast.ImportFromStmt)) else [])
+        ]
+        note = ""
+        if target == "js":
+            python_only = [name for name in imports if name.split(".")[0] in sys.stdlib_module_names]
+            if python_only:
+                note = f" — imports Python stdlib that Node cannot resolve: {', '.join(python_only)}"
+        elif any(name.startswith("node:") for name in imports):
+            note = " — imports Node-only modules"
+        print(f"{target:<9}: supported (generation only){note}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="myna",
@@ -157,6 +192,10 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("script_args", nargs=argparse.REMAINDER, help="Arguments passed to the script")
     p_run.set_defaults(func=cmd_run)
 
+    p_targets = sub.add_parser("targets", aliases=["t"], help="Report which targets a .myna file declares/supports")
+    p_targets.add_argument("input", help="Input .myna file (or '-' for stdin)")
+    p_targets.set_defaults(func=cmd_targets)
+
     p_stats = sub.add_parser("stats", aliases=["s"], help="Compare token & character efficiency between Python and Myna")
     p_stats.add_argument("input", help="Input .py or .myna file")
     p_stats.add_argument("-m", "--minify-locals", action="store_true", help="Include local variable minification in default Myna output")
@@ -166,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (LexError, ParseError, DecompileError, OSError) as exc:
+    except (LexError, ParseError, DecompileError, TargetError, OSError) as exc:
         print(f"myna: {exc}", file=sys.stderr)
         return 1
 

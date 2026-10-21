@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from myna.lexer import TT, Token, tokenize
+from myna.targets import VALID_TARGETS
 import myna.ast_nodes as ast
 
 
@@ -80,11 +81,62 @@ class Parser:
 
     def parse_module(self) -> ast.Module:
         stmts: list[ast.Stmt] = []
+        module_targets: Optional[set[str]] = None
         self.skip_seps()
         while not self.at(TT.EOF):
-            stmts.append(self.parse_stmt())
+            if self._at_target_directive():
+                tok = self.cur()
+                targets = self._parse_target_clause()
+                self.skip_newlines()
+                if self.at(TT.LBRACE):
+                    body = self.parse_block()
+                    stmts.append(ast.TargetBlock(targets=targets, body=body, line=tok.line, col=tok.col))
+                else:
+                    if module_targets is not None:
+                        raise ParseError("duplicate @target module declaration", tok)
+                    if any(not self._is_docstring_stmt(stmt) for stmt in stmts):
+                        raise ParseError("@target module declaration must precede all code", tok)
+                    module_targets = targets
+            else:
+                stmts.append(self.parse_stmt())
             self.skip_seps()
-        return ast.Module(body=stmts, line=1, col=1)
+        return ast.Module(body=stmts, targets=module_targets, line=1, col=1)
+
+    def _at_target_directive(self) -> bool:
+        return (
+            self.at(TT.AT)
+            and self.peek().type == TT.IDENT
+            and self.peek().value == "target"
+            and self.peek(2).type == TT.LPAREN
+        )
+
+    def _parse_target_clause(self) -> set[str]:
+        tok = self.expect(TT.AT)
+        self.expect(TT.IDENT)
+        self.expect(TT.LPAREN, "'(' after @target")
+        targets: set[str] = set()
+        while not self.at(TT.RPAREN, TT.EOF):
+            self.skip_newlines()
+            name = self.expect(TT.IDENT, "target name").value
+            if name not in VALID_TARGETS:
+                allowed = ", ".join(sorted(VALID_TARGETS))
+                raise ParseError(f"unknown target {name!r}; expected one of: {allowed}", tok)
+            targets.add(name)
+            self.skip_newlines()
+            if not self.match(TT.COMMA):
+                break
+        self.expect(TT.RPAREN, "')' after target list")
+        if not targets:
+            raise ParseError("@target requires at least one target", tok)
+        return targets
+
+    @staticmethod
+    def _is_docstring_stmt(stmt: ast.Stmt) -> bool:
+        return (
+            isinstance(stmt, ast.ExprStmt)
+            and isinstance(stmt.expr, ast.Literal)
+            and stmt.expr.kind in ("str", "raw_str")
+        )
 
     def parse_block(self) -> list[ast.Stmt]:
         self.skip_newlines()
@@ -169,6 +221,9 @@ class Parser:
         self.skip_seps()
         self._combine_definition_sigil()
         tok = self.cur()
+
+        if self._at_target_directive():
+            raise ParseError("@target is only allowed at module level", tok)
 
         # Decorators: #[dec1, dec2]
         if tok.type == TT.HASH_LBRACK:

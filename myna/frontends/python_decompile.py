@@ -1249,7 +1249,10 @@ class PythonDecompiler:
         parts: list[str] = []
         for idx, g in enumerate(gens):
             prefix = ("%~" if g.is_async else "%") if idx > 0 else ("~" if g.is_async else "")
-            part = f"{prefix}{self.dec_target(g.target)}<-{self.dec_expr(g.iter)}"
+            iter_s = self.dec_expr(g.iter)
+            if isinstance(g.iter, py_ast.IfExp):
+                iter_s = f"({iter_s})"
+            part = f"{prefix}{self.dec_target(g.target)}<-{iter_s}"
             for cond in g.ifs:
                 part += f"?{self.dec_expr(cond)}"
             parts.append(part)

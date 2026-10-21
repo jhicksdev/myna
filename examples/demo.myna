@@ -1,3 +1,4 @@
+@target(py)
 <asyncio
 
 $$Task(id:i,title:s,priority:i=1,done:b=F){

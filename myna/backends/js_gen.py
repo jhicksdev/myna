@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import myna.ast_nodes as ast
+from myna.targets import enforce_module_target, expand_target_blocks
 
 
 class JSGenerator:
@@ -731,5 +732,6 @@ class JSGenerator:
 
 
 def compile_to_js(mod: ast.Module) -> str:
+    enforce_module_target(mod, "js")
     gen = JSGenerator()
-    return gen.generate(mod)
+    return gen.generate(expand_target_blocks(mod, "js"))

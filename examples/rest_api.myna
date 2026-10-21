@@ -1,3 +1,4 @@
+@target(py)
 <json,threading
 <http.server:{HTTPServer,BaseHTTPRequestHandler}
 <urllib.parse:{urlparse,parse_qs}

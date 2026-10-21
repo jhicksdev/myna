@@ -14,6 +14,7 @@ python3 -m myna compile input.myna -t js          # Compile Myna -> JavaScript (
 python3 -m myna decompile input.py -o output.myna # Compress Python -> Myna (-m for ultra-compact)
 python3 -m myna run script.myna                   # Execute .myna via Python
 python3 -m myna run -t js script.myna             # Execute .myna via Node.js
+python3 -m myna targets script.myna               # Report declared/inferred target support
 python3 -m myna stats file.py --show              # Measure token & character savings
 ```
 
@@ -32,6 +33,8 @@ python3 -m myna stats file.py --show              # Measure token & character sa
 - `<.utils:{helper}` → `from .utils import helper`
 - `@=x, y` → `global x, y` | `^=x, y` → `nonlocal x, y` | `~x[k]` → `del x[k]`
 - `$=Alias = [i]` → `type Alias = list[int]`
+- `@target(py)` → module is Python-only; `@target(py, js)` is portable (default: both). Must precede all code.
+- `@target(py) { <asyncio; ... }` / `@target(js) { ... }` → module-level compile-time block; only the matching target's statements/imports are emitted.
 
 ### Functions, Classes & Decorators
 - `@f(a:i, b=1)->i { ^a+b }` → `def f(a: int, b=1) -> int: return a + b`

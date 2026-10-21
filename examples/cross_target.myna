@@ -1,0 +1,12 @@
+@target(py) {
+  <math
+  @pi->f => math.pi
+}
+
+@target(js) {
+  @pi->f => Math.PI
+}
+
+@main {
+  p(`pi={pi():.2f}`)
+}
