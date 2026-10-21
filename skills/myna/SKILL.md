@@ -21,7 +21,7 @@ python3 -m myna stats file.py --show              # Measure token & character sa
 
 ### Literals, Types & Constants
 - `T` = `True`, `F` = `False`, `N` = `None`, `_` (standalone in `{_}`) = `pass`
-- `` `hi {x:.2f}` `` = `f"hi {x:.2f}"`, `_"raw"` = `r"raw"`, `0b"bytes"` = `b"bytes"`
+- `` `hi {x:.2f}` `` = `f"hi {x:.2f}"`, `_"raw"` = `r"raw"`, `0b"bytes"` = `b"bytes"` (`\xNN` escapes produce raw bytes)
 - **Types:** `i`=`int`, `f`=`float`, `s`=`str`, `b`=`bool`, `B`=`bytes`, `A`=`Any`, `N`=`None`
 - **Compound Types:** `T?`=`T | None`, `[T]`=`list[T]`, `{K:V}`=`dict[K, V]`, `{T}`=`set[T]`, `(T1,T2)`=`tuple[T1, T2]`
 

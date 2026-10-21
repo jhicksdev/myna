@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from myna import ParseError, myna_to_python, python_to_myna
+from myna import DecompileError, ParseError, myna_to_python, python_to_myna
 
 
 class TestMynaTranspiler(unittest.TestCase):
@@ -353,6 +353,18 @@ class TestMynaTranspiler(unittest.TestCase):
         ns = self.exec_myna(src)
         res = asyncio.run(ns["fetch_val"](7))
         self.assertEqual(res, 21)
+
+    def test_auto_imports_follow_docstring_and_future(self):
+        src = '"""Module docs."""\n<__future__:annotations\n$$P(x:i)\n'
+        lines = myna_to_python(src).splitlines()
+        self.assertTrue(lines[0].startswith(("'", '"')))
+        self.assertEqual(lines[1], "from __future__ import annotations")
+        self.assertEqual(lines[2], "from dataclasses import dataclass")
+
+    def test_decompile_error_on_unsupported_construct(self):
+        src = "try:\n    pass\nexcept* ValueError:\n    pass\n"
+        with self.assertRaises(DecompileError):
+            python_to_myna(src)
 
     def test_roundtrip_py_to_myna_to_py(self):
         py_src = """

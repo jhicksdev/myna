@@ -5,6 +5,17 @@ import ast as py_ast
 from typing import Optional
 
 
+class DecompileError(Exception):
+    """Raised when a Python construct cannot be represented faithfully in Myna."""
+
+    def __init__(self, node: py_ast.AST, message: str):
+        line = getattr(node, "lineno", None)
+        location = f" at line {line}" if line is not None else ""
+        super().__init__(f"DecompileError{location}: {message}")
+        self.node = node
+        self.line = line
+
+
 REVERSE_TYPE_SHORTHANDS = {
     "int": "i",
     "float": "f",
@@ -85,6 +96,7 @@ class _DeadLocalInliner(py_ast.NodeTransformer):
                 and read_counts.get(var_name, 0) == 1
                 and i + 1 < len(stmts)
                 and self._reads_var_directly(stmts[i + 1], var_name)
+                and not any(isinstance(n, py_ast.JoinedStr) for n in py_ast.walk(rhs_val))
             ):
                 stmts[i + 1] = self._replace_var(stmts[i + 1], var_name, rhs_val)
                 i += 1
@@ -549,8 +561,12 @@ class PythonDecompiler:
             if stmt.value is None:
                 return f"{self.ind()}^"
             if isinstance(stmt.value, py_ast.Tuple) and len(stmt.value.elts) > 1:
-                return f"{self.ind()}^{','.join(self.dec_expr(e) for e in stmt.value.elts)}"
-            return f"{self.ind()}^{self.dec_expr(stmt.value)}"
+                val_s = ",".join(self.dec_expr(e) for e in stmt.value.elts)
+            else:
+                val_s = self.dec_expr(stmt.value)
+            # Avoid `^!` (break), `^*` (yield), `^>` (continue), `^=` (nonlocal).
+            sep = " " if val_s.startswith(("!", "*", ">", "=")) else ""
+            return f"{self.ind()}^{sep}{val_s}"
 
         if isinstance(stmt, py_ast.Break):
             return f"{self.ind()}^!"
@@ -576,7 +592,7 @@ class PythonDecompiler:
         if isinstance(stmt, (py_ast.With, py_ast.AsyncWith)):
             return self.dec_with_stmt(stmt)
 
-        return f"{self.ind()}{py_ast.unparse(stmt)}"
+        raise DecompileError(stmt, f"unsupported statement: {type(stmt).__name__}")
 
     def dec_block(self, stmts: list[py_ast.stmt], allow_arrow: bool = True) -> str:
         self.indent_level += 1
@@ -826,6 +842,9 @@ class PythonDecompiler:
         if isinstance(node, py_ast.Constant) and node.value is None:
             return "N"
 
+        if isinstance(node, py_ast.Tuple):
+            return f"({','.join(self.dec_type(e) for e in node.elts)})"
+
         if isinstance(node, py_ast.Subscript) and isinstance(node.value, py_ast.Name):
             base = node.value.id
             if base == "Optional":
@@ -861,6 +880,26 @@ class PythonDecompiler:
             return ",".join(self.dec_expr(e) for e in expr.elts)
         return self.dec_expr(expr)
 
+    @staticmethod
+    def _dec_bytes(value: bytes) -> str:
+        buf: list[str] = []
+        for byte in value:
+            if byte == 0x5C:  # backslash
+                buf.append("\\\\")
+            elif byte == 0x22:  # double quote
+                buf.append('\\"')
+            elif byte == 0x0A:
+                buf.append("\\n")
+            elif byte == 0x0D:
+                buf.append("\\r")
+            elif byte == 0x09:
+                buf.append("\\t")
+            elif 0x20 <= byte < 0x7F:
+                buf.append(chr(byte))
+            else:
+                buf.append(f"\\x{byte:02x}")
+        return '0b"' + "".join(buf) + '"'
+
     def dec_expr(self, expr: py_ast.expr) -> str:
         if isinstance(expr, py_ast.Constant):
             if expr.value is True:
@@ -872,19 +911,29 @@ class PythonDecompiler:
             if expr.value is Ellipsis:
                 return "..."
             if isinstance(expr.value, bytes):
-                try:
-                    return f'0b"{expr.value.decode("utf-8")}"'
-                except UnicodeDecodeError:
-                    return repr(expr.value)
+                return self._dec_bytes(expr.value)
             return repr(expr.value)
 
         if isinstance(expr, py_ast.JoinedStr):
             parts: list[str] = []
             for v in expr.values:
                 if isinstance(v, py_ast.Constant) and isinstance(v.value, str):
-                    parts.append(v.value.replace("`", "\\`").replace("{", "{{").replace("}", "}}"))
+                    parts.append(
+                        v.value.replace("\\", "\\\\")
+                        .replace("`", "\\`")
+                        .replace("{", "{{")
+                        .replace("}", "}}")
+                    )
                 elif isinstance(v, py_ast.FormattedValue):
                     val_s = self.dec_expr(v.value)
+                    if v.conversion == ord("r"):
+                        val_s = f"@repr({val_s})"
+                    elif v.conversion == ord("s"):
+                        val_s = f"@str({val_s})"
+                    elif v.conversion == ord("a"):
+                        # Myna has no separate ascii(); repr is the closest
+                        # faithful primitive for ASCII data.
+                        val_s = f"@repr({val_s})"
                     if v.format_spec is not None and isinstance(v.format_spec, py_ast.JoinedStr):
                         fmt = "".join(
                             c.value for c in v.format_spec.values if isinstance(c, py_ast.Constant) and isinstance(c.value, str)
@@ -1087,7 +1136,9 @@ class PythonDecompiler:
             c_s = self.dec_expr(expr.test)
             t_s = self.dec_expr(expr.body)
             f_s = self.dec_expr(expr.orelse)
-            return f"({c_s}?{t_s}:{f_s})"
+            # `?` followed directly by `.` or `?` would lex as `?.` / `??`.
+            sep = " " if t_s.startswith((".", "?")) else ""
+            return f"({c_s}?{sep}{t_s}:{f_s})"
 
         if isinstance(expr, py_ast.Subscript):
             val_s = self.dec_expr(expr.value)
@@ -1157,7 +1208,7 @@ class PythonDecompiler:
         if isinstance(expr, py_ast.NamedExpr):
             return f"({self.dec_expr(expr.target)}:={self.dec_expr(expr.value)})"
 
-        return py_ast.unparse(expr)
+        raise DecompileError(expr, f"unsupported expression: {type(expr).__name__}")
 
     def _dec_range_bound(self, expr: py_ast.expr) -> str:
         s = self.dec_expr(expr)

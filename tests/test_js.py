@@ -107,6 +107,18 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertEqual(py_lines[:4], js_lines[:4])
         self.assertEqual(js_lines[4], "fibs=[0,1,1,2,3,5,8]")
 
+    def test_cross_target_byte_literals(self):
+        src = """
+        @main {
+            blob = 0b"a\\x80\\xff"
+            p(#blob)
+            p(blob[1])
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "3\n128")
+
     def test_cross_target_dicts_json_and_exceptions(self):
         src = """
         $$User(id:i, name:s) {

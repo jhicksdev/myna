@@ -458,7 +458,7 @@ class JSGenerator:
             if expr.kind == "bool":
                 return "true" if expr.value else "false"
             if expr.kind == "bytes":
-                return f"new TextEncoder().encode({expr.value!r})"
+                return f"new Uint8Array([{', '.join(str(ord(c)) for c in expr.value)}])"
             return repr(expr.value)
 
         if isinstance(expr, ast.FString):

@@ -124,6 +124,22 @@ def show(value):
         'show("hi")',
     ),
     (
+        "fstring_literal_backtick_and_braces",
+        """
+def decorate(value):
+    return f"`{{value={value}}}`"
+""",
+        "decorate(5)",
+    ),
+    (
+        "not_binds_looser_than_comparison",
+        """
+def check(value, items):
+    return not isinstance(value, (str, bytes)) and value not in items
+""",
+        "check(1, [2, 3])",
+    ),
+    (
         "one_line_if_assignment",
         """
 def gate(flag):

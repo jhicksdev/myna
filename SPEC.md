@@ -22,7 +22,7 @@
 | `"str"`, `'str'` | `"str"`, `'str'` | `"str"`, `'str'` | String literals |
 | `` `hi {x}` `` | `f"hi {x}"` | `` `hi ${x}` `` | Interpolated string (supports format spec `{x:.2f}`) |
 | `_"raw"` | `r"raw"` | `String.raw\`raw\`` | Raw string literal |
-| `0b"bytes"` | `b"bytes"` | `new TextEncoder().encode("bytes")` | Byte literal |
+| `0b"bytes"` | `b"bytes"` | `new Uint8Array([...])` | Byte literal (`\xNN` and octal escapes produce raw byte values) |
 | `# comment` | `# comment` | `// comment` | Single-line comment (`#` followed by space, `#`, or newline; note `//` is floor division) |
 
 ### Built-in Type Shorthands (in Type Annotations)

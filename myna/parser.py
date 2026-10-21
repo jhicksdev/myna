@@ -929,7 +929,10 @@ class Parser:
         # Prefix operators: !, -, +, ~, ~|, #, *, **
         if tok.type in (TT.BANG, TT.MINUS, TT.PLUS, TT.TILDE, TT.TILDE_PIPE, TT.HASH, TT.STAR, TT.STAR_STAR):
             self.pos += 1
-            operand = self.parse_expr(min_bp=80, stop_before_lbrace=stop_before_lbrace)
+            # `!` is logical not, which binds looser than comparisons but
+            # tighter than `&&`/`||`: `!x :? T` is `not (x is T)`.
+            operand_bp = 30 if tok.type == TT.BANG else 80
+            operand = self.parse_expr(min_bp=operand_bp, stop_before_lbrace=stop_before_lbrace)
             return ast.UnaryOp(op=tok.value, operand=operand, line=tok.line, col=tok.col)
 
         # Prefix range `..n` (`range(n)`) vs super attribute `..init(...)` / `..attr`
@@ -1298,6 +1301,8 @@ class Parser:
                 if depth == 0:
                     return False
                 depth -= 1
+            elif depth == 0 and t in (TT.NEWLINE, TT.SEMI, TT.EOF):
+                return False
             elif depth == 0 and t == TT.LEFT_ARROW:
                 return True
             look += 1
@@ -1523,6 +1528,11 @@ class Parser:
                 expr_src = "".join(expr_chars).strip()
                 sub_expr = parse_expr_str(expr_src, line=expr_line, col=expr_col)
                 parts.append((sub_expr, fmt_spec))
+            elif raw[i] == "\\" and i + 1 < n:
+                esc = raw[i + 1]
+                esc_map = {"`": "`", "\\": "\\", "n": "\n", "t": "\t", "r": "\r"}
+                lit_buf.append(esc_map.get(esc, "\\" + esc))
+                i += 2
             else:
                 lit_buf.append(raw[i])
                 i += 1
