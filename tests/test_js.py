@@ -1,6 +1,7 @@
 """Cross-target test suite verifying that Myna compiles and runs identically on Python 3.12+ and Node.js."""
 
 from __future__ import annotations
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from pathlib import Path
 from myna import myna_to_python, myna_to_js
 
 
+@unittest.skipUnless(shutil.which("node"), "node is required for cross-target JavaScript tests")
 class TestMynaJavaScriptTarget(unittest.TestCase):
     def run_both_targets(self, myna_src: str) -> tuple[str, str]:
         py_code = myna_to_python(myna_src)
