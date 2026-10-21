@@ -781,8 +781,16 @@ class Parser:
     # Pratt Expression Parser
     # ========================================================================
 
-    def parse_expr(self, min_bp: int = 0, stop_before_lbrace: bool = False) -> ast.Expr:
-        left = self.parse_prefix(stop_before_lbrace=stop_before_lbrace)
+    def parse_expr(
+        self,
+        min_bp: int = 0,
+        stop_before_lbrace: bool = False,
+        allow_paren_lambda: bool = True,
+    ) -> ast.Expr:
+        left = self.parse_prefix(
+            stop_before_lbrace=stop_before_lbrace,
+            allow_paren_lambda=allow_paren_lambda,
+        )
 
         while True:
             tok = self.cur()
@@ -861,13 +869,21 @@ class Parser:
                         # Right side of `x :? Type` can be a Myna type shorthand (`i`, `s`, `(i, s)`) or expression
                         rhs = self._parse_isinstance_rhs(stop_before_lbrace=stop_before_lbrace)
                     else:
-                        rhs = self.parse_expr(min_bp=r_bp, stop_before_lbrace=stop_before_lbrace)
+                        rhs = self.parse_expr(
+                            min_bp=r_bp,
+                            stop_before_lbrace=stop_before_lbrace,
+                            allow_paren_lambda=False,
+                        )
                     comparators.append(rhs)
                 left = ast.CompareOp(left=left, ops=ops, comparators=comparators, line=left.line, col=left.col)
                 continue
 
             self.pos += 1
-            right = self.parse_expr(min_bp=r_bp, stop_before_lbrace=stop_before_lbrace)
+            right = self.parse_expr(
+                min_bp=r_bp,
+                stop_before_lbrace=stop_before_lbrace,
+                allow_paren_lambda=False,
+            )
             if tok.type == TT.PIPE_GT:
                 left = ast.PipeExpr(left=left, right=right, line=left.line, col=left.col)
             else:
@@ -901,9 +917,13 @@ class Parser:
         return False
 
     def _parse_isinstance_rhs(self, stop_before_lbrace: bool) -> ast.Expr:
-        return self.parse_expr(min_bp=41, stop_before_lbrace=stop_before_lbrace)
+        return self.parse_expr(
+            min_bp=41,
+            stop_before_lbrace=stop_before_lbrace,
+            allow_paren_lambda=False,
+        )
 
-    def parse_prefix(self, stop_before_lbrace: bool = False) -> ast.Expr:
+    def parse_prefix(self, stop_before_lbrace: bool = False, allow_paren_lambda: bool = True) -> ast.Expr:
         tok = self.cur()
 
         # Prefix operators: !, -, +, ~, ~|, #, *, **
@@ -979,7 +999,7 @@ class Parser:
 
         # Parenthesized expression, Tuple, Generator expression, or Multi-param Lambda `(a, b) => ...`
         if tok.type == TT.LPAREN:
-            if self._looks_like_paren_lambda():
+            if allow_paren_lambda and self._looks_like_paren_lambda():
                 return self.parse_paren_lambda(stop_before_lbrace=stop_before_lbrace)
             return self.parse_paren_or_tuple_or_genexp()
 
@@ -994,7 +1014,10 @@ class Parser:
         raise ParseError(f"Unexpected token {tok.type.name} ({tok.value!r}) in expression", tok)
 
     def _looks_like_paren_lambda(self) -> bool:
-        # Scan ahead from `(` to matching `)` and check if immediately followed by `=>`
+        # Scan ahead from `(` to its matching `)`. It is a lambda only when the
+        # contents are a valid parameter list and the `)` is followed by `=>`.
+        # A tuple such as `(a.b, c[0])` followed by an arrow block must not be
+        # mistaken for `(a, b) => ...`.
         depth = 0
         i = self.pos
         while i < len(self.tokens):
@@ -1004,9 +1027,63 @@ class Parser:
             elif t == TT.RPAREN:
                 depth -= 1
                 if depth == 0:
-                    return i + 1 < len(self.tokens) and self.tokens[i + 1].type == TT.FAT_ARROW
+                    if i + 1 >= len(self.tokens) or self.tokens[i + 1].type != TT.FAT_ARROW:
+                        return False
+                    return self._tokens_look_like_params(self.pos + 1, i)
             i += 1
         return False
+
+    def _tokens_look_like_params(self, start: int, end: int) -> bool:
+        """Validate a token slice against the shape accepted by `parse_param_list`."""
+        i = start
+        while i < end:
+            # Bare `*` / `**` separators and typed varargs.
+            if self.tokens[i].type in (TT.STAR, TT.STAR_STAR):
+                i += 1
+                if i < end and self.tokens[i].type == TT.COMMA:
+                    i += 1
+                    continue
+            elif self.tokens[i].type == TT.SLASH:
+                i += 1
+                if i < end and self.tokens[i].type == TT.COMMA:
+                    i += 1
+                    continue
+
+            if i >= end or self.tokens[i].type != TT.IDENT:
+                return False
+            i += 1
+
+            if i < end and self.tokens[i].type == TT.COLON:
+                i = self._skip_param_expr(i + 1, end)
+                if i is None:
+                    return False
+            if i < end and self.tokens[i].type == TT.EQ:
+                i = self._skip_param_expr(i + 1, end)
+                if i is None:
+                    return False
+
+            if i < end:
+                if self.tokens[i].type != TT.COMMA:
+                    return False
+                i += 1
+        return True
+
+    def _skip_param_expr(self, start: int, end: int) -> Optional[int]:
+        """Return the index of the next top-level comma, or None if unbalanced."""
+        depth = 0
+        i = start
+        while i < end:
+            tt = self.tokens[i].type
+            if tt in (TT.LPAREN, TT.LBRACK, TT.LBRACE):
+                depth += 1
+            elif tt in (TT.RPAREN, TT.RBRACK, TT.RBRACE):
+                if depth == 0:
+                    return None
+                depth -= 1
+            elif tt == TT.COMMA and depth == 0:
+                return i
+            i += 1
+        return i
 
     def parse_paren_lambda(self, stop_before_lbrace: bool = False) -> ast.Lambda:
         tok = self.expect(TT.LPAREN)
@@ -1365,6 +1442,18 @@ class Parser:
 
         return ast.Slice(lower=lower, upper=upper, step=step)
 
+    @staticmethod
+    def _fstring_position(raw: str, index: int, tok: Token) -> tuple[int, int]:
+        """Map an index in the template body back to a source line/column."""
+        prefix = raw[:index]
+        line_offset = prefix.count("\n")
+        line = tok.line + line_offset
+        if line_offset:
+            col = len(prefix.rsplit("\n", 1)[1]) + 1
+        else:
+            col = tok.col + 1 + len(prefix)
+        return line, col
+
     def _parse_fstring(self, tok: Token) -> ast.FString:
         raw = tok.value
         parts: list[Union[str, tuple[ast.Expr, Optional[str]]]] = []
@@ -1386,6 +1475,10 @@ class Parser:
                     parts.append("".join(lit_buf))
                     lit_buf = []
                 i += 1
+                expr_start = i
+                while expr_start < n and raw[expr_start] in (" ", "\t"):
+                    expr_start += 1
+                expr_line, expr_col = self._fstring_position(raw, expr_start, tok)
                 depth = 1
                 expr_chars: list[str] = []
                 fmt_spec: Optional[str] = None
@@ -1428,7 +1521,7 @@ class Parser:
                     expr_chars.append(c)
                     i += 1
                 expr_src = "".join(expr_chars).strip()
-                sub_expr = parse_expr_str(expr_src)
+                sub_expr = parse_expr_str(expr_src, line=expr_line, col=expr_col)
                 parts.append((sub_expr, fmt_spec))
             else:
                 lit_buf.append(raw[i])
@@ -1526,7 +1619,12 @@ def parse(source: str) -> ast.Module:
     return parser.parse_module()
 
 
-def parse_expr_str(source: str) -> ast.Expr:
+def parse_expr_str(source: str, line: int = 1, col: int = 1) -> ast.Expr:
     tokens = tokenize(source)
+    if line != 1 or col != 1:
+        for token in tokens:
+            if token.line == 1:
+                token.col += col - 1
+            token.line += line - 1
     parser = Parser(tokens)
     return parser.parse_expr()

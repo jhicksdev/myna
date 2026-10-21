@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from myna import myna_to_python, python_to_myna
+from myna import ParseError, myna_to_python, python_to_myna
 
 
 class TestMynaTranspiler(unittest.TestCase):
@@ -170,6 +170,50 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["sent_code"], 200)
         self.assertEqual(ns["sent_body"], {"status": "ok", "total": 42})
         self.assertEqual(ns["decoded"], {"a": 1})
+
+    def test_definition_sigils_after_infix_operators(self):
+        src = """
+        x = 1 + @max(2, 3)
+        y = 2*@max(3, 4)
+        z = 1+@max(5, 6)
+
+        +@exported(a:i)->i => a + 1
+        """
+        ns = self.exec_myna(src)
+        self.assertEqual(ns["x"], 4)
+        self.assertEqual(ns["y"], 8)
+        self.assertEqual(ns["z"], 7)
+        self.assertEqual(ns["__all__"], ["exported"])
+
+    def test_tuple_condition_with_arrow_body(self):
+        src = """
+        @shrink(token, first, second) {
+            count = 2
+            ? token <- (first, second) => count -= 1
+            ^ count
+        }
+
+        @kind(value) {
+            ? value :? (str, bytes) => ^ "text"
+            ^ "other"
+        }
+
+        shrunk = shrink("x", "x", "y")
+        untouched = shrink("z", "x", "y")
+        text = kind("hi")
+        other = kind(1)
+        """
+        ns = self.exec_myna(src)
+        self.assertEqual(ns["shrunk"], 1)
+        self.assertEqual(ns["untouched"], 2)
+        self.assertEqual(ns["text"], "text")
+        self.assertEqual(ns["other"], "other")
+
+    def test_fstring_subexpression_error_reports_source_line(self):
+        src = "@f {\n  x = 1\n  ^`value={x.}`\n}"
+        with self.assertRaises(ParseError) as ctx:
+            myna_to_python(src)
+        self.assertEqual(ctx.exception.token.line, 3)
 
     def test_control_flow_and_loops(self):
         src = """
