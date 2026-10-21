@@ -20,9 +20,9 @@
 | `_` | `pass` / `_` | `/*noop*/` / `_` | No-op statement when standalone in block, or wildcard identifier |
 | `42`, `3.14`, `0xff` | `42`, `3.14`, `0xff` | `42`, `3.14`, `0xff` | Numeric literals |
 | `"str"`, `'str'` | `"str"`, `'str'` | `"str"`, `'str'` | String literals |
-| `` `hi {x}` `` | `f"hi {x}"` | `` `hi ${x}` `` | Interpolated string (supports format spec `{x:.2f}`) |
+| `` `hi {x}` `` | `f"hi {x}"` | `` `hi ${x}` `` | Interpolated string (supports format spec `{x:.2f}`; escapes `` \` ``, `\\`, `\n`, `\t`, `\r`) |
 | `_"raw"` | `r"raw"` | `String.raw\`raw\`` | Raw string literal |
-| `0b"bytes"` | `b"bytes"` | `new TextEncoder().encode("bytes")` | Byte literal |
+| `0b"bytes"` | `b"bytes"` | `new Uint8Array([...])` | Byte literal (literal text is UTF-8; `\xNN`/octal escapes produce raw byte values) |
 | `# comment` | `# comment` | `// comment` | Single-line comment (`#` followed by space, `#`, or newline; note `//` is floor division) |
 
 ### Built-in Type Shorthands (in Type Annotations)

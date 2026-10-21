@@ -306,7 +306,7 @@ def tokenize(source: str) -> list[Token]:
             start_col = col
             i += 2
             col += 2
-            s_val, i, line, col = _read_string(source, i, line, col, raw=False)
+            s_val, i, line, col = _read_string(source, i, line, col, raw=False, bytes_mode=True)
             tokens.append(Token(TT.BYTES, s_val, line, start_col, had_space))
             had_space = False
             at_stmt_start = False
@@ -445,7 +445,14 @@ def tokenize(source: str) -> list[Token]:
     return tokens
 
 
-def _read_string(source: str, i: int, line: int, col: int, raw: bool) -> tuple[str, int, int, int]:
+def _read_string(
+    source: str,
+    i: int,
+    line: int,
+    col: int,
+    raw: bool,
+    bytes_mode: bool = False,
+) -> tuple[str, int, int, int]:
     quote = source[i]
     start_line, start_col = line, col
     n = len(source)
@@ -466,19 +473,49 @@ def _read_string(source: str, i: int, line: int, col: int, raw: bool) -> tuple[s
         if ch == "\\" and i + 1 < n:
             if raw:
                 buf.append(source[i : i + 2])
+                i += 2
+                col += 2
+            elif bytes_mode and source[i + 1] in ("x", "X"):
+                hex_digits = source[i + 2 : i + 4]
+                if len(hex_digits) != 2 or any(c not in "0123456789abcdefABCDEF" for c in hex_digits):
+                    raise LexError("Invalid \\x escape in byte literal", line, col)
+                buf.append(chr(int(hex_digits, 16)))
+                i += 4
+                col += 4
+            elif bytes_mode and source[i + 1] in "01234567":
+                end = i + 2
+                while end < n and end < i + 4 and source[end] in "01234567":
+                    end += 1
+                octal = source[i + 1 : end]
+                value = int(octal, 8)
+                if value > 0xFF:
+                    raise LexError("Octal escape in byte literal exceeds 255", line, col)
+                buf.append(chr(value))
+                col += end - i
+                i = end
             else:
                 esc = source[i + 1]
                 esc_map = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", "'": "'", '"': '"', "0": "\0"}
-                buf.append(esc_map.get(esc, "\\" + esc))
-            i += 2
-            col += 2
+                mapped = esc_map.get(esc)
+                if mapped is not None:
+                    buf.append(mapped)
+                else:
+                    literal = "\\" + esc
+                    # Bytes keep the historical UTF-8 encoding for literal
+                    # characters; `\xNN`/octal escapes are raw byte values.
+                    buf.append(literal.encode("utf-8").decode("latin-1") if bytes_mode else literal)
+                i += 2
+                col += 2
         else:
             if ch == "\n":
                 line += 1
                 col = 1
             else:
                 col += 1
-            buf.append(ch)
+            if bytes_mode:
+                buf.append(ch.encode("utf-8").decode("latin-1"))
+            else:
+                buf.append(ch)
             i += 1
 
     if i >= n:

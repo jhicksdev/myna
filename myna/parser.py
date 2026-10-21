@@ -123,8 +123,51 @@ class Parser:
     # Statements
     # ========================================================================
 
+    def _combine_definition_sigil(self) -> None:
+        """Join adjacent definition sigils that follow a same-line `}`.
+
+        The lexer only emits `+@`, `*@`, `~@`, etc. at obvious statement
+        starts. After a closing block brace on the same line it emits the
+        operator and `@`/`$` separately; this restores the combined token when
+        they are adjacent and a definition follows.
+        """
+        tok = self.cur()
+        combined: Optional[TT] = None
+        extra = 0
+        if tok.type == TT.PLUS:
+            nxt = self.peek()
+            if not nxt.preceded_by_space and nxt.type in (TT.AT, TT.DOLLAR):
+                combined = TT.PLUS_AT if nxt.type == TT.AT else TT.PLUS_DOLLAR
+                extra = 1
+        elif tok.type == TT.STAR:
+            nxt = self.peek()
+            if not nxt.preceded_by_space and nxt.type == TT.AT:
+                combined = TT.STAR_AT
+                extra = 1
+        elif tok.type == TT.TILDE:
+            nxt = self.peek()
+            if not nxt.preceded_by_space and nxt.type == TT.AT:
+                combined = TT.TILDE_AT
+                extra = 1
+            elif not nxt.preceded_by_space and nxt.type == TT.STAR:
+                after = self.peek(2)
+                if not after.preceded_by_space and after.type == TT.AT:
+                    combined = TT.TILDE_STAR_AT
+                    extra = 2
+
+        if combined is not None:
+            self.tokens[self.pos] = Token(
+                combined,
+                tok.value + "".join(t.value for t in self.tokens[self.pos + 1 : self.pos + 1 + extra]),
+                tok.line,
+                tok.col,
+                tok.preceded_by_space,
+            )
+            del self.tokens[self.pos + 1 : self.pos + 1 + extra]
+
     def parse_stmt(self, decorators: Optional[list[ast.Expr]] = None) -> ast.Stmt:
         self.skip_seps()
+        self._combine_definition_sigil()
         tok = self.cur()
 
         # Decorators: #[dec1, dec2]
@@ -398,7 +441,10 @@ class Parser:
             self.tokens[self.pos] = Token(TT.DOT, ".", tok.line, tok.col + 1, False)
         else:
             self.expect(TT.QMARK)
-        cond = self.parse_expr(stop_before_lbrace=True)
+        # A parenthesized tuple followed by `=>` opens the branch block, not a
+        # lambda: `? (a, b) => ...`. Bare lambdas as the whole condition are
+        # ambiguous, so parenthesize them inside another expression instead.
+        cond = self.parse_expr(stop_before_lbrace=True, allow_paren_lambda=False)
         body = self.parse_block()
         branches = [ast.IfBranch(cond=cond, body=body)]
         else_body: Optional[list[ast.Stmt]] = None
@@ -486,7 +532,7 @@ class Parser:
 
     def parse_while_stmt(self) -> ast.WhileStmt:
         tok = self.expect(TT.PCT_QMARK)
-        cond = self.parse_expr(stop_before_lbrace=True)
+        cond = self.parse_expr(stop_before_lbrace=True, allow_paren_lambda=False)
         body = self.parse_block()
 
         else_body: Optional[list[ast.Stmt]] = None
@@ -1298,6 +1344,8 @@ class Parser:
                 if depth == 0:
                     return False
                 depth -= 1
+            elif depth == 0 and t in (TT.NEWLINE, TT.SEMI, TT.EOF):
+                return False
             elif depth == 0 and t == TT.LEFT_ARROW:
                 return True
             look += 1
@@ -1523,6 +1571,11 @@ class Parser:
                 expr_src = "".join(expr_chars).strip()
                 sub_expr = parse_expr_str(expr_src, line=expr_line, col=expr_col)
                 parts.append((sub_expr, fmt_spec))
+            elif raw[i] == "\\" and i + 1 < n:
+                esc = raw[i + 1]
+                esc_map = {"`": "`", "\\": "\\", "n": "\n", "t": "\t", "r": "\r"}
+                lit_buf.append(esc_map.get(esc, "\\" + esc))
+                i += 2
             else:
                 lit_buf.append(raw[i])
                 i += 1

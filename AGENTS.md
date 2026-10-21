@@ -5,7 +5,7 @@ Myna (package `myna-lang`) is a dense, brace-delimited language that transpiles 
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests -v             # full suite (16 tests)
+python3 -m unittest discover -s tests -v             # full suite
 python3 -m unittest discover -s tests -p "test_js.py" -v
 python3 -m unittest tests.test_myna.TestMynaTranspiler.test_operators_pipe_and_shorthands
 python3 -m myna run examples/demo.myna                # smoke-test the CLI + examples
@@ -13,14 +13,14 @@ python3 -m myna stats examples/demo.myna
 ```
 
 - Run from the repo root (imports are absolute `myna.*`) or `pip install -e .`. Python >= 3.11; no runtime dependencies.
-- `tests/test_js.py` shells out to `node` and has no skip guard, so the full suite fails without Node on `PATH`.
+- `tests/test_js.py` shells out to `node` and skips when Node is not on `PATH`.
 - No lint, format, typecheck, or CI config is checked in; unittest is the only verification gate. `.ruff_cache/` is a local artifact, not a configured tool.
 - CLI aliases: `compile`/`c`/`myna2py`/`myna2js`, `decompile`/`d`/`py2myna`, `run`/`r`, `stats`/`s`. Output extension `.js`/`.mjs` selects the JS target only when `-t` is omitted.
 
 ## Architecture
 
 - Myna -> target: `lexer.py` (tokens) -> `parser.py` (recursive descent + Pratt) -> `ast_nodes.py` -> `backends/python_gen.py` or `backends/js_gen.py`.
-- Python -> Myna: `frontends/python_decompile.py` uses Python's stdlib `ast`; it does not go through the Myna lexer/parser. `test_roundtrip_py_to_myna_to_py` is the contract.
+- Python -> Myna: `frontends/python_decompile.py` uses Python's stdlib `ast`; it does not go through the Myna lexer/parser. `test_roundtrip_py_to_myna_to_py` and `test_roundtrip_corpus.py` are the contract.
 - Adding a construct means touching lexer + parser + both backends. Each generator raises `ValueError("Unsupported ... node")` for unhandled AST nodes, so JS/Python parity gaps surface only when exercised.
 - Public API is re-exported from `myna/__init__.py`; CLI wiring is in `myna/cli.py`.
 

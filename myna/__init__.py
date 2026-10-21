@@ -4,7 +4,7 @@ from myna.lexer import tokenize, LexError
 from myna.parser import parse, ParseError
 from myna.backends.python_gen import compile_to_python
 from myna.backends.js_gen import compile_to_js
-from myna.frontends.python_decompile import decompile_python
+from myna.frontends.python_decompile import DecompileError, decompile_python
 
 __version__ = "0.2.0"
 
@@ -37,4 +37,5 @@ __all__ = [
     "python_to_myna",
     "LexError",
     "ParseError",
+    "DecompileError",
 ]

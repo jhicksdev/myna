@@ -5,7 +5,7 @@ This encodes the decompiler contract: Python we claim to support must survive
 fixtures additionally execute both versions and compare their results.
 
 These tests are intentionally written before the parser/decompiler fixes; a
-failures here is a concrete bug to fix, not a flaky test.
+failure here is a concrete bug to fix, not a flaky test.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def run_expression(source: str, expression: str):
     exec(compile(source, "<roundtrip-fixture>", "exec"), namespace)
     try:
         return ("ok", eval(expression, namespace))
-    except Exception as exc:  # noqa: BLE001 - fixtures compare exception identity
+    except Exception as exc:
         return ("error", type(exc).__name__, str(exc))
 
 
@@ -94,6 +94,9 @@ class TestStdlibCorpus(RoundTripAssertions):
     def test_stdlib_sources_pretty(self):
         self.assert_corpus_roundtrips(self._stdlib_paths(), compact=False)
 
+    def test_stdlib_sources_minified_locals(self):
+        self.assert_corpus_roundtrips(self._stdlib_paths(), compact=True, minify_locals=True)
+
 
 # Each fixture is (name, Python source, expression to evaluate).
 # They are deliberately small and self-contained so the original and the
@@ -124,6 +127,22 @@ def show(value):
         'show("hi")',
     ),
     (
+        "fstring_literal_backtick_and_braces",
+        """
+def decorate(value):
+    return f"`{{value={value}}}`"
+""",
+        "decorate(5)",
+    ),
+    (
+        "not_binds_looser_than_comparison",
+        """
+def check(value, items):
+    return not isinstance(value, (str, bytes)) and value not in items
+""",
+        "check(1, [2, 3])",
+    ),
+    (
         "one_line_if_assignment",
         """
 def gate(flag):
@@ -141,6 +160,16 @@ def biggest(a, b):
     return 1 + max(a, b)
 """,
         "biggest(2, 5)",
+    ),
+    (
+        "tuple_if_condition",
+        """
+def truthy(first, second):
+    if (first, second):
+        return 1
+    return 0
+""",
+        "truthy(0, 1)",
     ),
     (
         "tuple_membership_arrow_body",

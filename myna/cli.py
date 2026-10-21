@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from myna import myna_to_python, myna_to_js, python_to_myna
+from myna import DecompileError, LexError, ParseError, myna_to_python, myna_to_js, python_to_myna
 
 
 def count_tokens(text: str) -> tuple[int, str]:
@@ -164,7 +164,11 @@ def main(argv: list[str] | None = None) -> int:
     p_stats.set_defaults(func=cmd_stats)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (LexError, ParseError, DecompileError, OSError) as exc:
+        print(f"myna: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

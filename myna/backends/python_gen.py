@@ -84,8 +84,14 @@ class PythonGenerator:
     def generate(self, mod: ast.Module) -> str:
         self._scan_imports(mod)
         lines: list[str] = []
+        prefix_len = 0
+        in_prefix = True
         for stmt in mod.body:
             lines.extend(self.gen_stmt(stmt))
+            if in_prefix and self._is_module_prefix_stmt(stmt):
+                prefix_len = len(lines)
+            else:
+                in_prefix = False
 
         header: list[str] = []
         if self.needs_dataclass_import and not self.has_explicit_dataclass_import:
@@ -99,8 +105,19 @@ class PythonGenerator:
             export_list = ", ".join(repr(name) for name in self.exports)
             lines.append(f"__all__ = [{export_list}]")
 
-        all_lines = (header + [""] + lines) if (header and lines) else (header + lines)
-        return "\n".join(all_lines).rstrip() + "\n"
+        if header:
+            # Automatically injected imports must follow the module docstring and
+            # any `from __future__` imports to remain valid Python.
+            lines = lines[:prefix_len] + header + [""] + lines[prefix_len:]
+        return "\n".join(lines).rstrip() + "\n"
+
+    @staticmethod
+    def _is_module_prefix_stmt(stmt: ast.Stmt) -> bool:
+        if isinstance(stmt, ast.ExprStmt) and isinstance(stmt.expr, ast.Literal):
+            return stmt.expr.kind in ("str", "raw_str")
+        if isinstance(stmt, ast.ImportFromStmt) and stmt.module == "__future__":
+            return True
+        return False
 
     def _scan_imports(self, mod: ast.Module) -> None:
         for stmt in mod.body:
@@ -467,7 +484,7 @@ class PythonGenerator:
                 return repr(expr.value)
             if expr.kind == "bytes":
                 assert isinstance(expr.value, str)
-                return repr(expr.value.encode("utf-8"))
+                return repr(expr.value.encode("latin-1"))
             return repr(expr.value)
 
         if isinstance(expr, ast.FString):
