@@ -189,6 +189,12 @@ MULTI_CHAR_TOKENS: list[tuple[str, TT]] = [
     ("|=", TT.PIPE_EQ),
 ]
 
+# Sigils that introduce a definition and are only valid at the start of a
+# statement. When they appear mid-expression the lexer falls through to the
+# single-character operator (e.g. `1+@max(...)` -> `1 + @max(...)`).
+STATEMENT_ONLY_SIGILS = {"+@", "+$", "*@", "~@", "~*@"}
+
+
 SINGLE_CHAR_TOKENS: dict[str, TT] = {
     "(": TT.LPAREN,
     ")": TT.RPAREN,
@@ -244,6 +250,7 @@ def tokenize(source: str) -> list[Token]:
     col = 1
     paren_depth = 0  # Tracks (), [] depth (not {} since {} are statement blocks too)
     had_space = True
+    at_stmt_start = True
 
     while i < n:
         ch = source[i]
@@ -261,6 +268,7 @@ def tokenize(source: str) -> list[Token]:
             if paren_depth == 0:
                 if tokens and tokens[-1].type != TT.NEWLINE:
                     tokens.append(Token(TT.NEWLINE, "\n", line, col, True))
+                at_stmt_start = True
             i += 1
             line += 1
             col = 1
@@ -290,6 +298,7 @@ def tokenize(source: str) -> list[Token]:
             s_val, i, line, col = _read_string(source, i, line, col, raw=True)
             tokens.append(Token(TT.RAW_STR, s_val, line, start_col, had_space))
             had_space = False
+            at_stmt_start = False
             continue
 
         # Byte literals: 0b"..." or 0b'...'
@@ -300,6 +309,7 @@ def tokenize(source: str) -> list[Token]:
             s_val, i, line, col = _read_string(source, i, line, col, raw=False)
             tokens.append(Token(TT.BYTES, s_val, line, start_col, had_space))
             had_space = False
+            at_stmt_start = False
             continue
 
         # Strings: "..." or '...'
@@ -308,6 +318,7 @@ def tokenize(source: str) -> list[Token]:
             s_val, i, line, col = _read_string(source, i, line, col, raw=False)
             tokens.append(Token(TT.STR, s_val, line, start_col, had_space))
             had_space = False
+            at_stmt_start = False
             continue
 
         # Template / F-Strings: `...`
@@ -336,6 +347,7 @@ def tokenize(source: str) -> list[Token]:
             col += 1
             tokens.append(Token(TT.FSTR, "".join(buf), start_line, start_col, had_space))
             had_space = False
+            at_stmt_start = False
             continue
 
         # Numbers
@@ -376,6 +388,7 @@ def tokenize(source: str) -> list[Token]:
             num_str = source[start_i:i]
             tokens.append(Token(TT.FLOAT if is_float else TT.INT, num_str, line, start_col, had_space))
             had_space = False
+            at_stmt_start = False
             continue
 
         # Identifiers
@@ -388,11 +401,17 @@ def tokenize(source: str) -> list[Token]:
             ident_str = source[start_i:i]
             tokens.append(Token(TT.IDENT, ident_str, line, start_col, had_space))
             had_space = False
+            at_stmt_start = False
             continue
 
         # Multi-character operators & sigils
         matched_multi = False
         for pat, tt in MULTI_CHAR_TOKENS:
+            # Definition sigils starting with `+`, `*`, or `~` are only valid at
+            # statement start. Inside expressions they must split back into the
+            # operator plus `@`/`$` so e.g. `1+@max(2, 3)` works.
+            if pat in STATEMENT_ONLY_SIGILS and not at_stmt_start:
+                continue
             if source.startswith(pat, i):
                 tokens.append(Token(tt, pat, line, col, had_space))
                 if tt == TT.HASH_LBRACK:
@@ -401,6 +420,7 @@ def tokenize(source: str) -> list[Token]:
                 col += len(pat)
                 had_space = False
                 matched_multi = True
+                at_stmt_start = False
                 break
         if matched_multi:
             continue
@@ -416,6 +436,7 @@ def tokenize(source: str) -> list[Token]:
             i += 1
             col += 1
             had_space = False
+            at_stmt_start = tt in (TT.SEMI, TT.LBRACE)
             continue
 
         raise LexError(f"Unexpected character {ch!r}", line, col)
