@@ -790,6 +790,10 @@ class PythonDecompiler:
             if pat.value is None:
                 return "N"
             return "T" if pat.value else "F"
+        # `pattern as name` can be nested inside sequence/mapping/class
+        # patterns; Myna has no equivalent, so reject the whole pattern.
+        if any(isinstance(node, py_ast.MatchAs) and node.pattern is not None for node in py_ast.walk(pat)):
+            raise DecompileError(pat, "capture pattern (`as`) is not supported")
         # Sequence/mapping/or/star/class patterns use syntax that Myna's
         # expression patterns already accept.
         return py_ast.unparse(pat)

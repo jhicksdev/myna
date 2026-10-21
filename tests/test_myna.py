@@ -381,6 +381,7 @@ class TestMynaTranspiler(unittest.TestCase):
             "try:\n    pass\nexcept* ValueError:\n    pass\n",
             "def f(value):\n    return f'{value!a}'\n",
             "def f(a, b):\n    return a @ b\n",
+            "def f(x):\n    match x:\n        case [a as b, c]:\n            return b\n",
         ]
         for src in unsupported:
             with self.subTest(src=src):
