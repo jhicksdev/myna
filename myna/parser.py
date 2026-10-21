@@ -398,7 +398,10 @@ class Parser:
             self.tokens[self.pos] = Token(TT.DOT, ".", tok.line, tok.col + 1, False)
         else:
             self.expect(TT.QMARK)
-        cond = self.parse_expr(stop_before_lbrace=True)
+        # A parenthesized tuple followed by `=>` opens the branch block, not a
+        # lambda: `? (a, b) => ...`. Bare lambdas as the whole condition are
+        # ambiguous, so parenthesize them inside another expression instead.
+        cond = self.parse_expr(stop_before_lbrace=True, allow_paren_lambda=False)
         body = self.parse_block()
         branches = [ast.IfBranch(cond=cond, body=body)]
         else_body: Optional[list[ast.Stmt]] = None
@@ -486,7 +489,7 @@ class Parser:
 
     def parse_while_stmt(self) -> ast.WhileStmt:
         tok = self.expect(TT.PCT_QMARK)
-        cond = self.parse_expr(stop_before_lbrace=True)
+        cond = self.parse_expr(stop_before_lbrace=True, allow_paren_lambda=False)
         body = self.parse_block()
 
         else_body: Optional[list[ast.Stmt]] = None
@@ -929,10 +932,7 @@ class Parser:
         # Prefix operators: !, -, +, ~, ~|, #, *, **
         if tok.type in (TT.BANG, TT.MINUS, TT.PLUS, TT.TILDE, TT.TILDE_PIPE, TT.HASH, TT.STAR, TT.STAR_STAR):
             self.pos += 1
-            # `!` is logical not, which binds looser than comparisons but
-            # tighter than `&&`/`||`: `!x :? T` is `not (x is T)`.
-            operand_bp = 30 if tok.type == TT.BANG else 80
-            operand = self.parse_expr(min_bp=operand_bp, stop_before_lbrace=stop_before_lbrace)
+            operand = self.parse_expr(min_bp=80, stop_before_lbrace=stop_before_lbrace)
             return ast.UnaryOp(op=tok.value, operand=operand, line=tok.line, col=tok.col)
 
         # Prefix range `..n` (`range(n)`) vs super attribute `..init(...)` / `..attr`

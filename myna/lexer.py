@@ -436,7 +436,7 @@ def tokenize(source: str) -> list[Token]:
             i += 1
             col += 1
             had_space = False
-            at_stmt_start = tt in (TT.SEMI, TT.LBRACE)
+            at_stmt_start = tt in (TT.SEMI, TT.LBRACE, TT.RBRACE)
             continue
 
         raise LexError(f"Unexpected character {ch!r}", line, col)
@@ -496,18 +496,26 @@ def _read_string(
             else:
                 esc = source[i + 1]
                 esc_map = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", "'": "'", '"': '"', "0": "\0"}
-                buf.append(esc_map.get(esc, "\\" + esc))
+                mapped = esc_map.get(esc)
+                if mapped is not None:
+                    buf.append(mapped)
+                else:
+                    literal = "\\" + esc
+                    # Bytes keep the historical UTF-8 encoding for literal
+                    # characters; `\xNN`/octal escapes are raw byte values.
+                    buf.append(literal.encode("utf-8").decode("latin-1") if bytes_mode else literal)
                 i += 2
                 col += 2
         else:
-            if bytes_mode and ord(ch) > 0xFF:
-                raise LexError("Byte literal contains a non-byte character", line, col)
             if ch == "\n":
                 line += 1
                 col = 1
             else:
                 col += 1
-            buf.append(ch)
+            if bytes_mode:
+                buf.append(ch.encode("utf-8").decode("latin-1"))
+            else:
+                buf.append(ch)
             i += 1
 
     if i >= n:

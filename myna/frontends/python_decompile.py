@@ -509,6 +509,8 @@ class PythonDecompiler:
 
         if isinstance(stmt, py_ast.AugAssign):
             op = self._aug_op(stmt.op)
+            if op is None:
+                raise DecompileError(stmt, f"unsupported augmented operator: {type(stmt.op).__name__}")
             return f"{self.ind()}{self.dec_expr(stmt.target)}{op}={self.dec_expr(stmt.value)}"
 
         if isinstance(stmt, py_ast.Delete):
@@ -786,7 +788,7 @@ class PythonDecompiler:
             if pat.value is None:
                 return "N"
             return "T" if pat.value else "F"
-        return py_ast.unparse(pat)
+        raise DecompileError(pat, f"unsupported pattern: {type(pat).__name__}")
 
     def dec_for_stmt(self, stmt: py_ast.For | py_ast.AsyncFor) -> str:
         kw = "%~" if isinstance(stmt, py_ast.AsyncFor) else "%"
@@ -931,9 +933,7 @@ class PythonDecompiler:
                     elif v.conversion == ord("s"):
                         val_s = f"@str({val_s})"
                     elif v.conversion == ord("a"):
-                        # Myna has no separate ascii(); repr is the closest
-                        # faithful primitive for ASCII data.
-                        val_s = f"@repr({val_s})"
+                        raise DecompileError(v, "f-string !a (ascii) conversion is not supported")
                     if v.format_spec is not None and isinstance(v.format_spec, py_ast.JoinedStr):
                         fmt = "".join(
                             c.value for c in v.format_spec.values if isinstance(c, py_ast.Constant) and isinstance(c.value, str)
@@ -1069,7 +1069,15 @@ class PythonDecompiler:
         if isinstance(expr, py_ast.UnaryOp):
             if isinstance(expr.op, py_ast.Not):
                 op_s = self.dec_expr(expr.operand)
-                if isinstance(expr.operand, (py_ast.Compare, py_ast.BoolOp, py_ast.BinOp, py_ast.IfExp)):
+                is_isinstance = (
+                    isinstance(expr.operand, py_ast.Call)
+                    and isinstance(expr.operand.func, py_ast.Name)
+                    and expr.operand.func.id == "isinstance"
+                )
+                if is_isinstance or isinstance(
+                    expr.operand,
+                    (py_ast.Compare, py_ast.BoolOp, py_ast.BinOp, py_ast.IfExp),
+                ):
                     return f"!({op_s})"
                 return f"!{op_s}"
             if isinstance(expr.op, py_ast.Invert):
@@ -1105,6 +1113,8 @@ class PythonDecompiler:
 
         if isinstance(expr, py_ast.BinOp):
             op = self._bin_op(expr.op)
+            if op is None:
+                raise DecompileError(expr, f"unsupported binary operator: {type(expr.op).__name__}")
             l_s = self.dec_expr(expr.left)
             r_s = self.dec_expr(expr.right)
             if isinstance(expr.left, (py_ast.BinOp, py_ast.BoolOp, py_ast.Compare, py_ast.IfExp)):
@@ -1117,6 +1127,8 @@ class PythonDecompiler:
             parts = [self.dec_expr(expr.left)]
             for op, comp in zip(expr.ops, expr.comparators):
                 op_s = self._cmp_op(op)
+                if op_s is None:
+                    raise DecompileError(expr, f"unsupported comparison operator: {type(op).__name__}")
                 c_s = self.dec_expr(comp)
                 # Ensure tokens like `===N` have a space if needed (`=== N` or `===N`—note `===` is multi-char and `N` is ident, so `===N` lexes cleanly!)
                 parts.append(f"{op_s}{c_s}")
@@ -1235,10 +1247,10 @@ class PythonDecompiler:
             parts.append(part)
         return " ".join(parts)
 
-    def _aug_op(self, op: py_ast.operator) -> str:
+    def _aug_op(self, op: py_ast.operator) -> Optional[str]:
         return self._bin_op(op)
 
-    def _bin_op(self, op: py_ast.operator) -> str:
+    def _bin_op(self, op: py_ast.operator) -> Optional[str]:
         table = {
             py_ast.Add: "+",
             py_ast.Sub: "-",
@@ -1253,9 +1265,9 @@ class PythonDecompiler:
             py_ast.BitXor: "^",
             py_ast.BitAnd: "&",
         }
-        return table.get(type(op), "+")
+        return table.get(type(op))
 
-    def _cmp_op(self, op: py_ast.cmpop) -> str:
+    def _cmp_op(self, op: py_ast.cmpop) -> Optional[str]:
         table = {
             py_ast.Eq: "==",
             py_ast.NotEq: "!=",
@@ -1268,7 +1280,7 @@ class PythonDecompiler:
             py_ast.In: "<-",
             py_ast.NotIn: "!<-",
         }
-        return table.get(type(op), "==")
+        return table.get(type(op))
 
 
 def decompile_python(source: str, compact: bool = True, minify_locals: bool = False) -> str:

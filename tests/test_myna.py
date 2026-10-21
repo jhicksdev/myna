@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 import asyncio
+import pathlib
+import subprocess
+import sys
+import tempfile
 import unittest
 
 from myna import DecompileError, ParseError, myna_to_python, python_to_myna
@@ -356,15 +360,46 @@ class TestMynaTranspiler(unittest.TestCase):
 
     def test_auto_imports_follow_docstring_and_future(self):
         src = '"""Module docs."""\n<__future__:annotations\n$$P(x:i)\n'
-        lines = myna_to_python(src).splitlines()
-        self.assertTrue(lines[0].startswith(("'", '"')))
-        self.assertEqual(lines[1], "from __future__ import annotations")
-        self.assertEqual(lines[2], "from dataclasses import dataclass")
+        ns: dict = {}
+        exec(compile(myna_to_python(src), "<auto-imports>", "exec"), ns)
+        point = ns["P"](3)
+        self.assertEqual(point.x, 3)
+        self.assertEqual(ns["__doc__"], "Module docs.")
+
+    def test_definition_sigils_after_inline_block(self):
+        ns = self.exec_myna("@f { _ } +@b()=>2\n")
+        self.assertEqual(ns["__all__"], ["b"])
+        self.assertEqual(ns["b"](), 2)
+
+    def test_byte_literal_escapes_and_utf8(self):
+        ns = self.exec_myna('raw = 0b"a\\x80\\377"\ntext = 0b"é"\n')
+        self.assertEqual(ns["raw"], b"a\x80\xff")
+        self.assertEqual(ns["text"], "é".encode("utf-8"))
 
     def test_decompile_error_on_unsupported_construct(self):
-        src = "try:\n    pass\nexcept* ValueError:\n    pass\n"
-        with self.assertRaises(DecompileError):
-            python_to_myna(src)
+        unsupported = [
+            "try:\n    pass\nexcept* ValueError:\n    pass\n",
+            "def f(value):\n    return f'{value!a}'\n",
+            "def f(a, b):\n    return a @ b\n",
+        ]
+        for src in unsupported:
+            with self.subTest(src=src):
+                with self.assertRaises(DecompileError):
+                    python_to_myna(src)
+
+    def test_cli_reports_decompile_error_without_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = pathlib.Path(tmp) / "bad.py"
+            bad.write_text("try:\n    pass\nexcept* ValueError:\n    pass\n", encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "decompile", str(bad)],
+                cwd=pathlib.Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("DecompileError", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
 
     def test_roundtrip_py_to_myna_to_py(self):
         py_src = """
