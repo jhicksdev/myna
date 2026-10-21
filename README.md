@@ -9,7 +9,7 @@
 Coding agents spend thousands of context and output tokens on repetitive syntactic boilerplate (`def __init__(self, ...):`, `self.`, `Optional[...]`, `try ... except Exception as e:`, quoted JSON keys, and 4-space indentation blocks).
 
 Myna replaces verbose multi-token boilerplate with **tokenizer-friendly ASCII sigils and digraphs** (`$$`, `@`, `~@`, `=>`, `??`, `!?`, `!&`, `$`, `$?`) and brace-delimited blocks (`{}`):
-- **~48%–52% fewer LLM tokens** and **~50%–58% fewer characters** than equivalent Python.
+- **~46%–52% fewer LLM tokens** and **~48%–58% fewer characters** than equivalent Python (compact and ultra-compact modes).
 - **Zero indentation fragility:** Blocks use `{ ... }` or `=>`, making partial diffs and single-line generation rock-solid for AI agents.
 - **Bi-directional (`Python <-> Myna`) & Multi-Target (`Myna -> Python / JS`):** Compress existing Python codebases into `.myna` to fit twice as much code into an agent's context window, or let agents write `.myna` and transpile to clean Python or JavaScript.
 - **Agent-Ready:** Ships with a compact Rosetta Stone skill (`skills/myna/SKILL.md`) that teaches any coding agent to read and write idiomatic Myna in one shot.
@@ -18,7 +18,7 @@ Myna replaces verbose multi-token boilerplate with **tokenizer-friendly ASCII si
 
 ## Side-by-Side Comparison
 
-### Python (25 lines, 618 chars)
+### Python (21 lines, 611 chars)
 ```python
 from dataclasses import dataclass
 import asyncio
@@ -43,7 +43,7 @@ async def pending(tasks: list[Task], min_p: int = 1) -> list[dict[str, object]]:
         return []
 ```
 
-### Myna (9 lines, 294 chars — >52% smaller)
+### Myna (11 lines, 299 chars — 51% smaller)
 ```myna
 <asyncio
 $$Task(id:i,title:s,priority:i=1,done:b=F){
@@ -94,12 +94,19 @@ python3 -m myna stats examples/books_api.myna
 
 ## Token & Character Efficiency Benchmarks
 
-Measured via `python3 -m myna stats`:
+Measured by compiling each example to Python and running `python3 -m myna stats` on the generated file (so the Myna columns reflect the decompiler's `compact` and `-m` modes). Counts use the built-in `bpe-approx` estimator unless `tiktoken` is installed:
+
+```bash
+python3 -m myna compile examples/demo.myna -o /tmp/demo.py
+python3 -m myna stats /tmp/demo.py
+```
+
+Running `stats` directly on a `.myna` file instead compares the generated Python against that file as written, so its Myna counts will differ from the table.
 
 | Example Program | Python Tokens / Chars | Myna (Compact) | Myna (Ultra-Compact `-m`) |
 | :--- | :--- | :--- | :--- |
-| **`examples/demo.myna`** (Async Task Pipeline) | `517` toks / `953` chars | `359` toks / `646` chars | **`247` toks (-52.2%)** / **`397` chars (-58.3%)** |
-| **`examples/rest_api.myna`** (Todo HTTP REST API) | `4,146` toks / `8,129` chars | `2,190` toks (**-47.2%**) / `3,925` chars (**-51.7%**) | **`2,052` toks (-50.5%)** / **`3,566` chars (-56.1%)** |
+| **`examples/demo.myna`** (Async Task Pipeline) | `517` toks / `953` chars | `271` toks (**-47.6%**) / `463` chars (**-51.4%**) | **`247` toks (-52.2%)** / **`397` chars (-58.3%)** |
+| **`examples/rest_api.myna`** (Todo HTTP REST API) | `4,105` toks / `8,011` chars | `2,183` toks (**-46.8%**) / `3,932` chars (**-50.9%**) | **`2,045` toks (-50.2%)** / **`3,573` chars (-55.4%)** |
 | **`examples/books_api.myna`** (Library Catalog API) | `4,402` toks / `8,515` chars | `2,371` toks (**-46.1%**) / `4,381` chars (**-48.5%**) | **`2,289` toks (-48.0%)** / **`4,104` chars (-51.8%)** |
 
 ---
