@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import myna.ast_nodes as ast
+from myna.targets import enforce_module_target, expand_target_blocks
 
 
 TYPE_SHORTHANDS = {
@@ -695,7 +696,8 @@ class PythonGenerator:
         parts: list[str] = []
         for c in clauses:
             kw = "async for" if c.is_async else "for"
-            part = f"{kw} {self.gen_target(c.target)} in {self.gen_expr(c.iter)}"
+            iter_s = self.gen_expr(c.iter, 11) if isinstance(c.iter, ast.TernaryOp) else self.gen_expr(c.iter)
+            part = f"{kw} {self.gen_target(c.target)} in {iter_s}"
             for cond in c.conds:
                 part += f" if {self.gen_expr(cond)}"
             parts.append(part)
@@ -721,5 +723,6 @@ class PythonGenerator:
 
 
 def compile_to_python(mod: ast.Module) -> str:
+    enforce_module_target(mod, "py")
     gen = PythonGenerator()
-    return gen.generate(mod)
+    return gen.generate(expand_target_blocks(mod, "py"))

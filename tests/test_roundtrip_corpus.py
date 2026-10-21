@@ -162,6 +162,14 @@ def biggest(a, b):
         "biggest(2, 5)",
     ),
     (
+        "comprehension_over_conditional",
+        """
+def pick(flag, first, second):
+    return [value for value in (first if flag else second)]
+""",
+        "pick(True, [1, 2], [3])",
+    ),
+    (
         "tuple_if_condition",
         """
 def truthy(first, second):

@@ -5,8 +5,9 @@ from myna.parser import parse, ParseError
 from myna.backends.python_gen import compile_to_python
 from myna.backends.js_gen import compile_to_js
 from myna.frontends.python_decompile import DecompileError, decompile_python
+from myna.targets import TargetError
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 def myna_to_python(source: str) -> str:
@@ -38,4 +39,5 @@ __all__ = [
     "LexError",
     "ParseError",
     "DecompileError",
+    "TargetError",
 ]

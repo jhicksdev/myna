@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 
-from myna import DecompileError, ParseError, myna_to_python, python_to_myna
+from myna import DecompileError, ParseError, TargetError, myna_to_js, myna_to_python, python_to_myna
 
 
 class TestMynaTranspiler(unittest.TestCase):
@@ -366,6 +366,46 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(point.x, 3)
         self.assertEqual(ns["__doc__"], "Module docs.")
 
+    def test_target_module_declaration(self):
+        py_only = '@target(py)\n<math\nvalue=math.pi\n'
+        ns = self.exec_myna(py_only)
+        self.assertAlmostEqual(ns["value"], 3.141592653589793)
+        with self.assertRaises(TargetError):
+            myna_to_js(py_only)
+
+        portable = '@target(py, js)\n"""doc"""\nvalue=1\n'
+        self.assertIn("value = 1", myna_to_python(portable))
+        self.assertIn("let value = 1;", myna_to_js(portable))
+
+    def test_target_blocks_select_code_and_imports(self):
+        src = """
+        @target(py) {
+            <math
+            @platform()->s => `py:{math.pi:.2f}`
+        }
+
+        @target(js) {
+            @platform()->s => `js:{Math.PI:.2f}`
+            @only_js()->i => 1
+        }
+        """
+        ns = self.exec_myna(src)
+        self.assertEqual(ns["platform"](), "py:3.14")
+        self.assertNotIn("only_js", ns)
+
+    def test_target_syntax_errors(self):
+        invalid = [
+            "@target(rust)\nvalue=1\n",
+            "@target()\nvalue=1\n",
+            "@target(py)\n@target(js)\nvalue=1\n",
+            "value=1\n@target(py)\n",
+            "@f { @target(py) { _ } }\n",
+        ]
+        for src in invalid:
+            with self.subTest(src=src):
+                with self.assertRaises(ParseError):
+                    myna_to_python(src)
+
     def test_definition_sigils_after_inline_block(self):
         ns = self.exec_myna("@f { _ } +@b()=>2\n")
         self.assertEqual(ns["__all__"], ["b"])
@@ -387,6 +427,29 @@ class TestMynaTranspiler(unittest.TestCase):
             with self.subTest(src=src):
                 with self.assertRaises(DecompileError):
                     python_to_myna(src)
+
+    def test_cli_targets_report_and_compile_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = pathlib.Path(tmp) / "py_only.myna"
+            source.write_text("@target(py)\n<math\nvalue=math.pi\n", encoding="utf-8")
+            cwd = pathlib.Path(__file__).resolve().parents[1]
+            report = subprocess.run(
+                [sys.executable, "-m", "myna", "targets", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            compile_js = subprocess.run(
+                [sys.executable, "-m", "myna", "compile", "-t", "js", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(report.returncode, 0)
+        self.assertIn("Declared : py", report.stdout)
+        self.assertIn("js       : unsupported", report.stdout)
+        self.assertEqual(compile_js.returncode, 1)
+        self.assertIn("module declares @target(py)", compile_js.stderr)
 
     def test_cli_reports_decompile_error_without_traceback(self):
         with tempfile.TemporaryDirectory() as tmp:

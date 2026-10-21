@@ -22,6 +22,7 @@ python3 -m myna stats examples/demo.myna
 - Myna -> target: `lexer.py` (tokens) -> `parser.py` (recursive descent + Pratt) -> `ast_nodes.py` -> `backends/python_gen.py` or `backends/js_gen.py`.
 - Python -> Myna: `frontends/python_decompile.py` uses Python's stdlib `ast`; it does not go through the Myna lexer/parser. `test_roundtrip_py_to_myna_to_py` and `test_roundtrip_corpus.py` are the contract.
 - Adding a construct means touching lexer + parser + both backends. Each generator raises `ValueError("Unsupported ... node")` for unhandled AST nodes, so JS/Python parity gaps surface only when exercised.
+- Target support: `targets.py` enforces module-level `@target(...)` contracts and expands `@target(...) { ... }` blocks before either backend generates code.
 - Public API is re-exported from `myna/__init__.py`; CLI wiring is in `myna/cli.py`.
 
 ## Language-change checklist
@@ -29,7 +30,8 @@ python3 -m myna stats examples/demo.myna
 - Tests execute generated code and assert semantics, not emitted text. `test_js.py` compiles the same source for Python and Node and compares stdout.
 - Syntax is duplicated in three docs that must stay consistent: the README cheat sheet, `SPEC.md`, and `skills/myna/SKILL.md`.
 - `examples/*.myna` double as `myna stats` fixtures; keep them compilable.
-- The version is duplicated in `pyproject.toml` and `myna/__init__.py`; bump both together.
+- The version is duplicated in `pyproject.toml` and `myna/__init__.py`; bump both together and add a `CHANGELOG.md` entry.
+- Target blocks are module-level only (v0.3); imports inside them are emitted at module top level.
 
 ## Gotchas
 

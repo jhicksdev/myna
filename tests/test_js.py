@@ -107,6 +107,25 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertEqual(py_lines[:4], js_lines[:4])
         self.assertEqual(js_lines[4], "fibs=[0,1,1,2,3,5,8]")
 
+    def test_cross_target_target_blocks(self):
+        src = """
+        @target(py) {
+            <math
+            @platform()->s => `py:{math.pi:.2f}`
+        }
+
+        @target(js) {
+            @platform()->s => `js:{Math.PI:.2f}`
+        }
+
+        @main {
+            p(platform())
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, "py:3.14")
+        self.assertEqual(js_out, "js:3.14")
+
     def test_cross_target_byte_literals(self):
         src = """
         @main {

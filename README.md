@@ -71,14 +71,14 @@ pip install -e .
 # Run a Myna script directly (via Python)
 python3 -m myna run examples/demo.myna
 
-# Run a Myna script via Node.js (JavaScript target)
-python3 -m myna run -t js examples/demo.myna
+# Run a portable Myna script via Node.js (JavaScript target)
+python3 -m myna run -t js examples/cross_target.myna
 
 # Compile Myna -> Python (.py)
 python3 -m myna compile examples/rest_api.myna -o rest_api.py
 
 # Compile Myna -> JavaScript (.js)
-python3 -m myna compile -t js examples/demo.myna -o demo.js
+python3 -m myna compile -t js examples/cross_target.myna -o cross_target.js
 
 # Compress existing Python -> Myna (.myna)
 python3 -m myna decompile script.py -o script.myna
@@ -88,6 +88,9 @@ python3 -m myna decompile -m script.py -o script.min.myna
 
 # Compare token & character efficiency
 python3 -m myna stats examples/books_api.myna
+
+# Report declared/inferred Python & JavaScript support
+python3 -m myna targets examples/demo.myna
 ```
 
 ---
@@ -118,6 +121,7 @@ Running `stats` directly on a `.myna` file instead compares the generated Python
 | **Literals** | `T`, `F`, `N`, `U`, `_` | `True`, `False`, `None`, `None`, `pass` | `true`, `false`, `null`, `undefined`, `/*noop*/` |
 | **Types** | `i`, `f`, `s`, `b`, `B`, `A`, `T?`, `[T]`, `{K:V}` | `int`, `float`, `str`, `bool`, `bytes`, `Any`, `T \| None`, `list[T]`, `dict[K, V]` | *(Type annotations stripped in JS)* |
 | **Imports** | `<os, numpy>np` / `<mod:{a, b>c}` | `import os, numpy as np` / `from mod import a, b as c` | `import * as ...` / `import { a, b as c } from ...` |
+| **Targets** | `@target(py)` / `@target(py) { ... }` | Python-only module / Python-only block | JS-only module / JS-only block |
 | **Functions** | `@f(a:i, b=1)->i { ^a+b }` or `@f(a)=>a+1` | `def f(a: int, b=1) -> int: return a + b` | `function f(a, b = 1) { return a + b; }` |
 | **Async / Gen** | `~@f` / `~expr` / `*@gen` / `^*val` | `async def` / `await` / generator / `yield` | `async function` / `await` / `function*` / `yield` |
 | **Classes** | `$C < Base { @init(x){ .x=x } }` | `class C(Base): def __init__(self, x): self.x = x` | `class C extends Base { constructor(x) { this.x = x; } }` |

@@ -246,6 +246,16 @@ class Stmt(Node):
 @dataclass
 class Module(Node):
     body: list[Stmt] = field(default_factory=list)
+    # Set by a module-level `@target(...)` declaration; None means "no contract".
+    targets: Optional[set[str]] = None
+
+
+@dataclass
+class TargetBlock(Stmt):
+    """Module-level `@target(py) { ... }` conditional compilation block."""
+
+    targets: set[str] = field(default_factory=set)
+    body: list[Stmt] = field(default_factory=list)
 
 
 @dataclass

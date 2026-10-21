@@ -58,7 +58,11 @@
 | `<numpy>np` | `import numpy as np` | `import * as np from 'numpy';` |
 | `<pathlib:{Path, PurePath>PP}` | `from pathlib import Path, PurePath as PP` | `import { Path, PurePath as PP } from 'pathlib';` |
 | `<.utils:{helper}` | `from .utils import helper` | `import { helper } from './utils.js';` |
+| `@target(py)` / `@target(py, js)` | module target contract (default: both) | same |
+| `@target(py) { ... }` | compile-time block, emitted only for Python | same (module-level only, imports become top-level) |
 | `+@f(...)` / `+$C` | `def f(...)` + adds to `__all__` | `export function f(...)` / `export class C` |
+
+`@target(...)` with no block must be the first non-docstring statement and declares which targets the file supports; compiling for another target raises `TargetError`. With a block it selects the statements/imports emitted for that target. Target blocks are module-level only in v0.3.
 
 ---
 
