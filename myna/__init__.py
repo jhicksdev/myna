@@ -7,7 +7,7 @@ from myna.backends.js_gen import compile_to_js
 from myna.frontends.python_decompile import DecompileError, decompile_python
 from myna.targets import TargetError
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 def myna_to_python(source: str) -> str:

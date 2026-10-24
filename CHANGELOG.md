@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-24)
 
 - `myna run` now resolves relative imports (`<.util:{f}`, `<.pkg.mod:{f}`) to sibling
   `.myna` modules and package directories, with lazy compilation and normal

@@ -65,9 +65,17 @@ $$Task(id:i,title:s,priority:i=1,done:b=F){
 Myna requires **Python 3.11+** and has **zero external dependencies**.
 
 ```bash
-# Install in editable/local mode (optional)
+# Install from PyPI
+pip install myna-lang          # or: uv tool install myna-lang / pipx install myna-lang
+
+# Install for local development (from a checkout)
 pip install -e .
 
+# Create and run a script
+printf 'p(`hello from {1+1}`)\n' > hello.myna
+myna run hello.myna
+
+# The remaining examples are in a checkout of the repository.
 # Run a Myna script directly (via Python)
 python3 -m myna run examples/demo.myna
 
@@ -175,7 +183,7 @@ Running `stats` directly on a `.myna` file instead compares the generated Python
 | **With / Assert** | `!& f=open(p) { ... }` / `!? cond, "msg"` | `with open(p) as f:` / `assert cond, "msg"` | Scoped try/finally `.close()` / `if (!cond) throw ...` |
 | **Built-in Aliases** | `p`, `#x`, `@j`, `@J`, `@u8`, `@u8d`, `@srt`, `@sum` | `print`, `len(x)`, `json.loads`, `json.dumps`, `.encode`, `.decode`, `sorted`, `sum` | `console.log`, `len`, `JSON.parse`, `JSON.stringify`, `TextEncoder`, `TextDecoder`, `.sort`, `.reduce` |
 
-See [`SPEC.md`](SPEC.md) for the complete language specification and [`skills/myna/SKILL.md`](skills/myna/SKILL.md) for the AI agent skill file.
+See [`SPEC.md`](https://github.com/jhicksdev/myna/blob/main/SPEC.md) for the complete language specification and [`skills/myna/SKILL.md`](https://github.com/jhicksdev/myna/blob/main/skills/myna/SKILL.md) for the AI agent skill file.
 
 ---
 
@@ -189,4 +197,4 @@ python3 -m unittest discover -s tests -v
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/jhicksdev/myna/blob/main/LICENSE)
