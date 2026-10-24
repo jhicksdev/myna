@@ -30,7 +30,7 @@ python3 -m myna stats file.py --show              # Measure token & character sa
 - `<os, sys` → `import os, sys`
 - `<numpy>np` → `import numpy as np`
 - `<pathlib:{Path, PurePath>PP}` → `from pathlib import Path, PurePath as PP`
-- `<.utils:{helper}` → `from .utils import helper`
+- `<.utils:{helper}` → `from .utils import helper`; under `myna run`, `.utils` resolves to `utils.myna` beside the entry file, and `.pkg.mod` to `pkg/mod.myna` (directories need no `__init__.myna`).
 - `@=x, y` → `global x, y` | `^=x, y` → `nonlocal x, y` | `~x[k]` → `del x[k]`
 - `$=Alias = [i]` → `type Alias = list[int]`
 - `@target(py)` → module is Python-only; `@target(py, js)` is portable (default: both). Must precede all code.

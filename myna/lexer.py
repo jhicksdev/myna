@@ -236,10 +236,13 @@ class Token:
 
 
 class LexError(Exception):
-    def __init__(self, msg: str, line: int, col: int):
-        super().__init__(f"LexError at {line}:{col}: {msg}")
+    def __init__(self, msg: str, line: int, col: int, filename: str | None = None):
+        self.msg = msg
         self.line = line
         self.col = col
+        self.filename = filename
+        location = f"{filename}:{line}:{col}" if filename else f"{line}:{col}"
+        super().__init__(f"LexError at {location}: {msg}")
 
 
 def tokenize(source: str) -> list[Token]:

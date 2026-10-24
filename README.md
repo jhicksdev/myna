@@ -93,6 +93,31 @@ python3 -m myna stats examples/books_api.myna
 python3 -m myna targets examples/demo.myna
 ```
 
+### Multi-file programs
+
+`myna run` gives relative imports a package context, so a program can be split into
+sibling `.myna` files:
+
+```myna
+# main.myna
+<.util:{slug}
+p(slug("Hello World"))
+```
+
+```myna
+# util.myna
+@slug(text:s)->s { ^ text.lower().replace(" ", "-") }
+```
+
+- `<.util:{slug}` → `util.myna` beside the entry file.
+- `<.pkg.helper:{parse}` → `pkg/helper.myna`; `pkg` may have an `__init__.myna` or be a
+  plain directory (namespace package).
+- Absolute imports (`<json`, `<mypkg>alias`) keep their normal Python meaning.
+- Imported files are compiled on first import and cached by Python's import system.
+- `myna compile` still compiles one file at a time. If you use relative imports, the
+  emitted `.py` files must be placed in a matching Python package.
+- `myna run -t js` is single-file for now; multi-file resolution is Python-target only.
+
 ---
 
 ## Token & Character Efficiency Benchmarks

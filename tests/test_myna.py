@@ -482,6 +482,64 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(compile_js.returncode, 1)
         self.assertIn("module declares @target(py)", compile_js.stderr)
 
+    def test_run_resolves_relative_myna_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "util.myna").write_text(
+                "@target(py)\n@slug(text:s)->s { ^ text.lower().replace(' ', '-') }\n",
+                encoding="utf-8",
+            )
+            pkg = root / "pkg"
+            pkg.mkdir()
+            (pkg / "__init__.myna").write_text(
+                '@target(py)\n@name->s => "pkg"\n', encoding="utf-8"
+            )
+            (pkg / "helper.myna").write_text(
+                "@target(py)\n<..util:{slug}\n@label(x:s)->s => slug(x)\n",
+                encoding="utf-8",
+            )
+            (root / "plain.myna").write_text(
+                '@target(py)\n@helper->s => "plain"\n', encoding="utf-8"
+            )
+            (root / "main.myna").write_text(
+                "@target(py)\n"
+                "<.util:{slug}\n"
+                "<.pkg:{name}\n"
+                "<.pkg.helper:{label}\n"
+                "<.plain:{helper}\n"
+                'p(slug("Hello World"))\n'
+                "p(name())\n"
+                'p(label("Deep Import"))\n'
+                "p(helper())\n",
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(root / "main.myna")],
+                cwd=pathlib.Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.splitlines(), ["hello-world", "pkg", "deep-import", "plain"])
+
+    def test_run_reports_parse_error_with_module_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "broken.myna").write_text("@target(py)\n? nope {\n", encoding="utf-8")
+            (root / "main.myna").write_text(
+                '@target(py)\n<.broken:{x}\np("unreachable")\n', encoding="utf-8"
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(root / "main.myna")],
+                cwd=pathlib.Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("broken.myna", proc.stderr)
+        self.assertIn("ParseError", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
     def test_cli_reports_decompile_error_without_traceback(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad = pathlib.Path(tmp) / "bad.py"

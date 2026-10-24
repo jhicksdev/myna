@@ -6,10 +6,13 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
+import uuid
 from pathlib import Path
 
 from myna import DecompileError, LexError, ParseError, TargetError, myna_to_python, myna_to_js, parse, python_to_myna
 import myna.ast_nodes as ast
+from myna.loader import compile_myna_source, install
 from myna.targets import expand_target_blocks
 
 
@@ -69,6 +72,33 @@ def cmd_decompile(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_python_entry(src_path: Path, src: str, script_args: list[str]) -> int:
+    """Execute a Myna entry file with sibling `.myna` modules importable."""
+    root = src_path.resolve().parent
+    package = f"_myna_run_{uuid.uuid4().hex[:8]}"
+    package_module = types.ModuleType(package)
+    package_module.__path__ = [str(root)]
+    package_module.__package__ = package
+    package_module.__file__ = str(root)
+    sys.modules[package] = package_module
+
+    finder = install(package, root)
+    try:
+        py_code = compile_myna_source(src, src_path.resolve())
+        globs = {
+            "__name__": "__main__",
+            "__file__": str(src_path.resolve()),
+            "__package__": package,
+        }
+        sys.argv = [str(src_path)] + list(script_args)
+        exec(compile(py_code, str(src_path), "exec"), globs)
+    finally:
+        sys.meta_path.remove(finder)
+        for name in [n for n in sys.modules if n == package or n.startswith(package + ".")]:
+            del sys.modules[name]
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     src_path = Path(args.input)
     src = src_path.read_text(encoding="utf-8")
@@ -83,14 +113,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
-    py_code = myna_to_python(src)
-    globs = {
-        "__name__": "__main__",
-        "__file__": str(src_path.resolve()),
-    }
-    sys.argv = [str(src_path)] + list(args.script_args)
-    exec(compile(py_code, str(src_path), "exec"), globs)
-    return 0
+    return _run_python_entry(src_path, src, list(args.script_args))
 
 
 def cmd_stats(args: argparse.Namespace) -> int:

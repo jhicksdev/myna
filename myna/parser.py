@@ -9,9 +9,12 @@ import myna.ast_nodes as ast
 
 
 class ParseError(Exception):
-    def __init__(self, msg: str, token: Token):
-        super().__init__(f"ParseError at {token.line}:{token.col} (near {token.value!r}): {msg}")
+    def __init__(self, msg: str, token: Token, filename: str | None = None):
+        self.msg = msg
         self.token = token
+        self.filename = filename
+        location = f"{filename}:{token.line}:{token.col}" if filename else f"{token.line}:{token.col}"
+        super().__init__(f"ParseError at {location} (near {token.value!r}): {msg}")
 
 
 AUG_ASSIGN_TOKENS = {
