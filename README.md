@@ -80,6 +80,9 @@ python3 -m myna compile examples/rest_api.myna -o rest_api.py
 # Compile Myna -> JavaScript (.js)
 python3 -m myna compile -t js examples/cross_target.myna -o cross_target.js
 
+# Bundle a multi-file program into one standalone Python file
+python3 -m myna bundle src/main.myna -o app.py
+
 # Compress existing Python -> Myna (.myna)
 python3 -m myna decompile script.py -o script.myna
 
@@ -114,9 +117,13 @@ p(slug("Hello World"))
   plain directory (namespace package).
 - Absolute imports (`<json`, `<mypkg>alias`) keep their normal Python meaning.
 - Imported files are compiled on first import and cached by Python's import system.
+- `myna bundle src/main.myna -o app.py` embeds the whole relative-import graph in one
+  standalone Python file. It runs with a plain `python3` and does not need `myna`
+  installed; absolute imports still come from the environment.
 - `myna compile` still compiles one file at a time. If you use relative imports, the
   emitted `.py` files must be placed in a matching Python package.
-- `myna run -t js` is single-file for now; multi-file resolution is Python-target only.
+- `myna run -t js` is single-file for now; multi-file resolution and bundling are
+  Python-target only.
 
 ---
 

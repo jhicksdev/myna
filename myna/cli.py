@@ -12,6 +12,7 @@ from pathlib import Path
 
 from myna import DecompileError, LexError, ParseError, TargetError, myna_to_python, myna_to_js, parse, python_to_myna
 import myna.ast_nodes as ast
+from myna.bundler import BundleError, bundle
 from myna.loader import compile_myna_source, install
 from myna.targets import expand_target_blocks
 
@@ -116,6 +117,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     return _run_python_entry(src_path, src, list(args.script_args))
 
 
+def cmd_bundle(args: argparse.Namespace) -> int:
+    result = bundle(Path(args.input))
+    if args.output:
+        Path(args.output).write_text(result.code, encoding="utf-8")
+        print(f"myna: bundled {len(result.modules)} module(s) -> {args.output}", file=sys.stderr)
+    else:
+        sys.stdout.write(result.code)
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     path = Path(args.input)
     raw = path.read_text(encoding="utf-8")
@@ -209,6 +220,11 @@ def main(argv: list[str] | None = None) -> int:
     p_dec.add_argument("-m", "--minify-locals", action="store_true", help="Shorten function-local variable names to 1-char tokens")
     p_dec.set_defaults(func=cmd_decompile)
 
+    p_bundle = sub.add_parser("bundle", aliases=["b"], help="Bundle a multi-file Myna program into one standalone Python file")
+    p_bundle.add_argument("input", help="Entry .myna file")
+    p_bundle.add_argument("-o", "--output", help="Output .py file (default: stdout)")
+    p_bundle.set_defaults(func=cmd_bundle)
+
     p_run = sub.add_parser("run", aliases=["r"], help="Compile and execute a .myna file directly (via Python or Node.js)")
     p_run.add_argument("input", help="Input .myna file to run")
     p_run.add_argument("-t", "--target", choices=["py", "js"], default="py", help="Runtime target: 'py' (default) or 'js' (Node.js)")
@@ -228,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (LexError, ParseError, DecompileError, TargetError, OSError) as exc:
+    except (LexError, ParseError, DecompileError, TargetError, BundleError, OSError) as exc:
         print(f"myna: {exc}", file=sys.stderr)
         return 1
 

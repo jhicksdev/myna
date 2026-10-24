@@ -5,6 +5,8 @@
 - `myna run` now resolves relative imports (`<.util:{f}`, `<.pkg.mod:{f}`) to sibling
   `.myna` modules and package directories, with lazy compilation and normal
   `sys.modules` caching. `myna compile` is still per-file, and `-t js` is single-file.
+- Add `myna bundle input.myna -o app.py`, which embeds the relative-import graph in a
+  single standalone Python file that needs only the standard library at runtime.
 - Lex/parse errors raised while running or importing a module now include the source
   file path.
 - Fix `:?` runtime checks with compound types (`[T]`, `{K:V}`, `{T}`, `Name[T]`): they

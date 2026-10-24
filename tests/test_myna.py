@@ -540,6 +540,81 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertIn("ParseError", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
+    def test_bundle_produces_standalone_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "util.myna").write_text(
+                "@target(py)\n@slug(text:s)->s { ^ text.lower().replace(' ', '-') }\n",
+                encoding="utf-8",
+            )
+            (root / "plain.myna").write_text(
+                '@target(py)\n@plain->s => "plain"\n', encoding="utf-8"
+            )
+            pkg = root / "pkg"
+            pkg.mkdir()
+            (pkg / "__init__.myna").write_text(
+                '@target(py)\n@name->s => "pkg"\n', encoding="utf-8"
+            )
+            (pkg / "helper.myna").write_text(
+                "@target(py)\n<..util:{slug}\n@label(x:s)->s => slug(x)\n",
+                encoding="utf-8",
+            )
+            (root / "main.myna").write_text(
+                "@target(py)\n"
+                "<.util:{slug}\n"
+                "<.:{plain}\n"
+                "<.pkg.helper:{label}\n"
+                'p(slug("Hello World"))\n'
+                "p(plain.plain())\n"
+                'p(label("Deep Import"))\n',
+                encoding="utf-8",
+            )
+            bundle_path = root / "app.py"
+            repo_root = pathlib.Path(__file__).resolve().parents[1]
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "myna",
+                    "bundle",
+                    str(root / "main.myna"),
+                    "-o",
+                    str(bundle_path),
+                ],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            bundled = bundle_path.read_text(encoding="utf-8")
+            run = subprocess.run(
+                [sys.executable, "-I", str(bundle_path)],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.splitlines(), ["hello-world", "plain", "deep-import"])
+        self.assertNotIn("import myna", bundled)
+        self.assertNotIn("from myna", bundled)
+
+    def test_bundle_reports_unresolved_import(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "main.myna").write_text(
+                '@target(py)\n<.missing:{thing}\np("unreachable")\n', encoding="utf-8"
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "bundle", str(root / "main.myna")],
+                cwd=pathlib.Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("main.myna", proc.stderr)
+        self.assertIn("missing", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
     def test_cli_reports_decompile_error_without_traceback(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad = pathlib.Path(tmp) / "bad.py"
