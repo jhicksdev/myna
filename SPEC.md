@@ -171,6 +171,11 @@
 | `a..b` / `a..b..s` | `range(a, b)` / `range(a, b, s)` | Range iterator |
 | `..b` | `range(b)` | Range iterator `0..b` |
 
+*Runtime type checks with `:?` accept the type shorthands plus compound types. Compound
+types check their runtime origin: `[T]` → `list`/`Array.isArray`, `{K:V}` →
+`dict`/plain object, `{T}` → `set`/`Set`, and `Name[T]` → `Name`. A parenthesized list of
+types is a **union** — `x :? (i, s)` is `isinstance(x, (int, str))`, not a tuple type.*
+
 ### Built-in Call Shorthands
 | Myna | Python | JavaScript |
 | :--- | :--- | :--- |

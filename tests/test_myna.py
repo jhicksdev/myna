@@ -345,6 +345,37 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["tern"], "yes")
         self.assertEqual(ns["bit_inv"], ~0)
 
+    def test_isinstance_compound_types(self):
+        src = """
+        $Box {
+            @init(x:i) { .x = x }
+        }
+        lst = [1, 2]
+        d = {a: 1}
+        st = {1, 2}
+        nested = [[1]]
+        box = Box(3)
+        lst_ok = lst :? [i]
+        dict_ok = d :? {s:i}
+        set_ok = st :? {i}
+        nested_ok = nested :? [[i]]
+        generic_ok = box :? Box[i]
+        list_matches_dict = lst :? {s:i}
+        int_matches_list = 5 :? [i]
+        primitive_union = 5 :? (i, s)
+        single_ok = 5 :? i
+        """
+        ns = self.exec_myna(src)
+        self.assertTrue(ns["lst_ok"])
+        self.assertTrue(ns["dict_ok"])
+        self.assertTrue(ns["set_ok"])
+        self.assertTrue(ns["nested_ok"])
+        self.assertTrue(ns["generic_ok"])
+        self.assertFalse(ns["list_matches_dict"])
+        self.assertFalse(ns["int_matches_list"])
+        self.assertTrue(ns["primitive_union"])
+        self.assertTrue(ns["single_ok"])
+
     def test_async_functions(self):
         src = """
         <asyncio

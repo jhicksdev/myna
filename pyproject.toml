@@ -13,3 +13,6 @@ dependencies = []
 
 [project.scripts]
 myna = "myna.cli:main"
+
+[tool.setuptools]
+packages = ["myna", "myna.backends", "myna.frontends"]

@@ -78,7 +78,7 @@ python3 -m myna stats file.py --show              # Measure token & character sa
 - **Braceless `=>` Single-Statement Bodies:**
   - Functions/methods: `@to_dict->{s:A} => {.id, .title}` (implicitly returns expression)
   - Control/context blocks: `? x <= 0 => ^ {}` | `!!:ValueError => ^ "bad"` | `!& f=open(p) => ^ f.read()`
-- **Logic & Comparison:** `&&` (`and`), `||` (`or`), `!x` (`not x`), `===` (`is`), `!==` (`is not`), `<-` (`in`), `!<-` (`not in`), `x :? i` (`isinstance(x, int)`)
+- **Logic & Comparison:** `&&` (`and`), `||` (`or`), `!x` (`not x`), `===` (`is`), `!==` (`is not`), `<-` (`in`), `!<-` (`not in`), `x :? i` (`isinstance(x, int)`; compound types check the origin — `x :? [i]` → `isinstance(x, list)`, `x :? {s:A}` → `isinstance(x, dict)`, and `x :? (i, s)` is a union)
 - **Special Ops:** `#x` (`len(x)`), `~x` (`await x`), `~|x` (`~x` bitwise NOT), `a ?? b` (`a if a is not None else b`), `c ? a : b` (`a if c else b`), `x |> f(a)` (`f(x, a)`), `..n` (`range(n)`), `a..b..s` (`range(a, b, s)`)
 - **Built-in Call Aliases:** `p`=`print`, `@j`=`json.loads`, `@J`=`json.dumps`, `@u8(x)`=`x.encode('utf-8')`, `@u8d(x)`=`x.decode('utf-8')`, `@enum`=`enumerate`, `@zip`=`zip`, `@map`=`map`, `@flt`=`filter`, `@srt`=`sorted`, `@rev`=`reversed`, `@sum`=`sum`, `@min`=`min`, `@max`=`max`, `@abs`=`abs`, `@all`=`all`, `@any`=`any`, `@str`=`str`, `@int`=`int`, `@float`=`float`, `@bool`=`bool`, `@list`=`list`, `@dict`=`dict`, `@set`=`set`, `@tuple`=`tuple`, `@rnd`=`round`, `@open`=`open`
 

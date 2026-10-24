@@ -165,6 +165,29 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertEqual(py_out, js_out)
         self.assertEqual(js_out, "user=7:Ada\nok:Ada\nerr")
 
+    def test_cross_target_isinstance_compound_types(self):
+        src = """
+        @yes(flag:b)->s => flag ? "yes" : "no"
+
+        @main {
+            lst = [1, 2]
+            d = {a: 1}
+            st = {1, 2}
+            nested = [[1]]
+            p(yes(lst :? [i]))
+            p(yes(d :? {s:i}))
+            p(yes(st :? {i}))
+            p(yes(nested :? [[i]]))
+            p(yes(lst :? {s:i}))
+            p(yes(5 :? [i]))
+            p(yes(5 :? (i, s)))
+            p(yes("x" :? (i, s)))
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "yes\nyes\nyes\nyes\nno\nno\nyes\nyes")
+
 
 if __name__ == "__main__":
     unittest.main()

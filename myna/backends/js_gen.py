@@ -17,6 +17,7 @@ class JSGenerator:
         self.needs_range_helper = False
         self.needs_in_helper = False
         self.needs_len_helper = False
+        self.needs_is_dict_helper = False
 
     def ind(self) -> str:
         return self.indent_str * self.indent_level
@@ -62,6 +63,12 @@ class JSGenerator:
                 "if (typeof x.length === 'number') return x.length; "
                 "if (typeof x.size === 'number') return x.size; "
                 "return Object.keys(x).length; }"
+            )
+        if self.needs_is_dict_helper:
+            helpers.append(
+                "function __myna_is_dict(x) { "
+                "return x !== null && typeof x === 'object' "
+                "&& !Array.isArray(x) && !(x instanceof Set) && !(x instanceof Map); }"
             )
 
         all_lines = (helpers + [""] + lines) if (helpers and lines) else (helpers + lines)
@@ -533,15 +540,7 @@ class JSGenerator:
         if isinstance(expr, ast.CompareOp):
             if len(expr.ops) == 1 and expr.ops[0] == ":?":
                 lhs = self.gen_expr(expr.left)
-                rhs = expr.comparators[0]
-                if isinstance(rhs, ast.Ident):
-                    if rhs.name in ("i", "f", "int", "float"):
-                        return f"(typeof {lhs} === 'number')"
-                    if rhs.name in ("s", "str"):
-                        return f"(typeof {lhs} === 'string')"
-                    if rhs.name in ("b", "bool"):
-                        return f"(typeof {lhs} === 'boolean')"
-                return f"({lhs} instanceof {self.gen_expr(rhs)})"
+                return f"({self._js_isinstance(lhs, expr.comparators[0])})"
 
             parts: list[str] = []
             cur_left = expr.left
@@ -649,6 +648,37 @@ class JSGenerator:
             return f"({self.gen_expr(expr.target)} = {self.gen_expr(expr.value)})"
 
         raise ValueError(f"Unsupported expression node for JS: {expr!r}")
+
+    def _js_isinstance(self, subject: str, expr: ast.Expr) -> str:
+        if isinstance(expr, ast.Ident):
+            if expr.name in ("i", "f", "int", "float"):
+                return f"(typeof {subject} === 'number')"
+            if expr.name in ("s", "str"):
+                return f"(typeof {subject} === 'string')"
+            if expr.name in ("b", "bool"):
+                return f"(typeof {subject} === 'boolean')"
+            if expr.name in ("B", "bytes"):
+                return f"({subject} instanceof Uint8Array)"
+            if expr.name in ("A", "Any"):
+                return "true"
+            if expr.name in ("N", "None"):
+                return f"({subject} === null)"
+        if isinstance(expr, ast.TupleExpr):
+            # `(A, B)` in a runtime check is a union; bind the subject once so it is
+            # not evaluated repeatedly inside the `||` chain.
+            inner = " || ".join(self._js_isinstance("__v", e) for e in expr.elts) or "false"
+            return f"((__v) => {inner})({subject})"
+        # Compound type expressions check their runtime origin type.
+        if isinstance(expr, ast.ListExpr):
+            return f"Array.isArray({subject})"
+        if isinstance(expr, ast.SetExpr):
+            return f"({subject} instanceof Set)"
+        if isinstance(expr, ast.DictExpr):
+            self.needs_is_dict_helper = True
+            return f"__myna_is_dict({subject})"
+        if isinstance(expr, ast.Subscript):
+            return self._js_isinstance(subject, expr.value)
+        return f"({subject} instanceof {self.gen_expr(expr)})"
 
     def gen_call(self, call: ast.Call) -> str:
         if isinstance(call.func, ast.Ident):

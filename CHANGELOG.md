@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fix `:?` runtime checks with compound types (`[T]`, `{K:V}`, `{T}`, `Name[T]`): they
+  emitted invalid Python (`isinstance(x, [s])`) and JS (`x instanceof [s]`). They now
+  check the runtime origin type (`list`, `dict`, `set`, `Name`); `(A, B)` remains a union.
+- Fix `pip install -e .` failing because setuptools flat-layout discovery treated
+  `skills/` as a package; the distributed packages are now declared explicitly.
+
 ## 0.3.0
 
 - Add module-level `@target(...)` declarations and compile-time `@target(...) { ... }` blocks.

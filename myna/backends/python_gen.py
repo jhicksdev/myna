@@ -689,7 +689,18 @@ class PythonGenerator:
         if isinstance(expr, ast.Ident):
             return TYPE_SHORTHANDS.get(expr.name, expr.name)
         if isinstance(expr, ast.TupleExpr):
+            # `(A, B)` in a runtime check is a union: `isinstance(x, (A, B))`.
             return f"({', '.join(self._gen_isinstance_type(e) for e in expr.elts)})"
+        # Compound type expressions check their runtime origin type; parameterized
+        # generics are not valid as the second argument to `isinstance()`.
+        if isinstance(expr, ast.ListExpr):
+            return "list"
+        if isinstance(expr, ast.DictExpr):
+            return "dict"
+        if isinstance(expr, ast.SetExpr):
+            return "set"
+        if isinstance(expr, ast.Subscript):
+            return self._gen_isinstance_type(expr.value)
         return self.gen_expr(expr)
 
     def _gen_comp_clauses(self, clauses: list[ast.CompClause]) -> str:
