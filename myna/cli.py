@@ -12,7 +12,7 @@ from pathlib import Path
 
 from myna import DecompileError, LexError, ParseError, TargetError, myna_to_python, myna_to_js, parse, python_to_myna
 import myna.ast_nodes as ast
-from myna.bundler import BundleError, bundle
+from myna.bundler import BundleError, bundle, bundle_zipapp
 from myna.loader import compile_myna_source, install
 from myna.targets import expand_target_blocks
 
@@ -118,6 +118,20 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_bundle(args: argparse.Namespace) -> int:
+    if args.zipapp:
+        result = bundle_zipapp(Path(args.input))
+        output = Path(args.output) if args.output else Path(args.input).with_suffix(".pyz")
+        output.write_bytes(result.data)
+        try:
+            output.chmod(output.stat().st_mode | 0o111)
+        except OSError:
+            pass
+        print(
+            f"myna: bundled {len(result.modules)} module(s) -> {output} (zipapp)",
+            file=sys.stderr,
+        )
+        return 0
+
     result = bundle(Path(args.input))
     if args.output:
         Path(args.output).write_text(result.code, encoding="utf-8")
@@ -222,7 +236,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p_bundle = sub.add_parser("bundle", aliases=["b"], help="Bundle a multi-file Myna program into one standalone Python file")
     p_bundle.add_argument("input", help="Entry .myna file")
-    p_bundle.add_argument("-o", "--output", help="Output .py file (default: stdout)")
+    p_bundle.add_argument("-o", "--output", help="Output path (default: stdout, or <input>.pyz with --zipapp)")
+    p_bundle.add_argument("--zipapp", action="store_true", help="Write a runnable .pyz zipapp instead of a single .py script")
     p_bundle.set_defaults(func=cmd_bundle)
 
     p_run = sub.add_parser("run", aliases=["r"], help="Compile and execute a .myna file directly (via Python or Node.js)")

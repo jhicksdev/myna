@@ -64,7 +64,7 @@
 
 `@target(...)` with no block must be the first non-docstring statement and declares which targets the file supports; compiling for another target raises `TargetError`. With a block it selects the statements/imports emitted for that target. Target blocks are module-level only in v0.3.
 
-Relative imports resolve against the entry file's directory when run with `myna run`: `<.util:{f}` loads `util.myna` beside the entry file, and `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package). Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file.
+Relative imports resolve against the entry file's directory when run with `myna run`: `<.util:{f}` loads `util.myna` beside the entry file, and `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package). Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
 
 ---
 

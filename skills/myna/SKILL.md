@@ -15,6 +15,7 @@ python3 -m myna decompile input.py -o output.myna # Compress Python -> Myna (-m 
 python3 -m myna run script.myna                   # Execute .myna via Python
 python3 -m myna run -t js script.myna             # Execute .myna via Node.js
 python3 -m myna bundle script.myna -o app.py      # Bundle relative imports into one standalone Python file
+python3 -m myna bundle script.myna --zipapp -o app.pyz  # ...or a runnable, reproducible .pyz archive
 python3 -m myna targets script.myna               # Report declared/inferred target support
 python3 -m myna stats file.py --show              # Measure token & character savings
 ```

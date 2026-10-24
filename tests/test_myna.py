@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 from myna import DecompileError, ParseError, TargetError, myna_to_js, myna_to_python, python_to_myna
 
@@ -597,6 +598,77 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(run.stdout.splitlines(), ["hello-world", "plain", "deep-import"])
         self.assertNotIn("import myna", bundled)
         self.assertNotIn("from myna", bundled)
+
+    def test_bundle_zipapp_runs_standalone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "util.myna").write_text(
+                "@target(py)\n@slug(text:s)->s { ^ text.lower().replace(' ', '-') }\n",
+                encoding="utf-8",
+            )
+            pkg = root / "pkg"
+            pkg.mkdir()
+            (pkg / "__init__.myna").write_text(
+                '@target(py)\n@name->s => "pkg"\n', encoding="utf-8"
+            )
+            (pkg / "helper.myna").write_text(
+                "@target(py)\n<..util:{slug}\n@label(x:s)->s => slug(x)\n",
+                encoding="utf-8",
+            )
+            nsdir = root / "nsdir"
+            nsdir.mkdir()
+            (nsdir / "codes.myna").write_text(
+                '@target(py)\n@code->i => 7\n', encoding="utf-8"
+            )
+            (root / "main.myna").write_text(
+                "@target(py)\n"
+                "<.util:{slug}\n"
+                "<.pkg:{name}\n"
+                "<.pkg.helper:{label}\n"
+                "<.nsdir.codes:{code}\n"
+                'p(slug("Hello World"))\n'
+                "p(name())\n"
+                'p(label("Deep Import"))\n'
+                "p(code())\n",
+                encoding="utf-8",
+            )
+            repo_root = pathlib.Path(__file__).resolve().parents[1]
+            outputs = [root / "app.pyz", root / "app2.pyz"]
+            for output in outputs:
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "myna",
+                        "bundle",
+                        str(root / "main.myna"),
+                        "--zipapp",
+                        "-o",
+                        str(output),
+                    ],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+            first, second = (path.read_bytes() for path in outputs)
+            run = subprocess.run(
+                [sys.executable, "-I", str(outputs[0])],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+            )
+            with zipfile.ZipFile(outputs[0]) as archive:
+                names = set(archive.namelist())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(
+            run.stdout.splitlines(), ["hello-world", "pkg", "deep-import", "7"]
+        )
+        self.assertEqual(first, second)  # reproducible builds
+        self.assertTrue(first.startswith(b"#!/usr/bin/env python3\n"))
+        self.assertIn("_myna_app/main.py", names)
+        self.assertIn("_myna_app/nsdir/__init__.py", names)
+        self.assertIn("_myna_app/pkg/__init__.py", names)
 
     def test_bundle_reports_unresolved_import(self):
         with tempfile.TemporaryDirectory() as tmp:

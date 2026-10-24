@@ -21,7 +21,7 @@ python3 -m myna stats examples/demo.myna
 
 - Myna -> target: `lexer.py` (tokens) -> `parser.py` (recursive descent + Pratt) -> `ast_nodes.py` -> `backends/python_gen.py` or `backends/js_gen.py`.
 - `myna run` for the Python target installs `myna/loader.py`, a scoped import hook that resolves relative imports to sibling `.myna` modules; `myna compile` does not bundle imports.
-- `myna bundle` (`bundler.py`) compiles the relative-import graph into one standalone Python file with embedded module sources.
+- `myna bundle` (`bundler.py`) compiles the relative-import graph into one standalone Python file with embedded module sources, or a reproducible `.pyz` zipapp with real module files.
 - Python -> Myna: `frontends/python_decompile.py` uses Python's stdlib `ast`; it does not go through the Myna lexer/parser. `test_roundtrip_py_to_myna_to_py` and `test_roundtrip_corpus.py` are the contract.
 - Adding a construct means touching lexer + parser + both backends. Each generator raises `ValueError("Unsupported ... node")` for unhandled AST nodes, so JS/Python parity gaps surface only when exercised.
 - Target support: `targets.py` enforces module-level `@target(...)` contracts and expands `@target(...) { ... }` blocks before either backend generates code.

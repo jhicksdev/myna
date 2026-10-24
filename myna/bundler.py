@@ -1,16 +1,19 @@
-"""Bundle a multi-file Myna program into one standalone Python file.
+"""Bundle a multi-file Myna program into one standalone artifact.
 
 `myna bundle src/main.myna -o app.py` resolves the relative-import graph, compiles every
-module to Python, and embeds the results in a single artifact. Running the artifact needs
-only the Python standard library — not the `myna` package.
+module to Python, and embeds the results in a single script. `--zipapp` instead writes a
+runnable `.pyz` archive containing real module files. Either artifact needs only the
+Python standard library — not the `myna` package.
 
-The generated file installs the same kind of scoped finder that `myna run` uses, so module
-semantics (lazy imports, package `__init__`, namespace directories) are preserved.
-Absolute imports are left untouched and must be installed in the target environment.
+Both formats preserve module semantics (lazy imports, package `__init__`, namespace
+directories). Absolute imports are left untouched and must be installed in the target
+environment.
 """
 
 from __future__ import annotations
 
+import io
+import zipfile
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Iterator
@@ -37,6 +40,13 @@ class BundleModule:
 @dataclass
 class Bundle:
     code: str
+    modules: list[BundleModule]
+    namespaces: set[str]
+
+
+@dataclass
+class Zipapp:
+    data: bytes
     modules: list[BundleModule]
     namespaces: set[str]
 
@@ -100,12 +110,14 @@ def _resolve_import(
     return base, extras
 
 
-def _load_module(entry: Path) -> Bundle:
-    root = entry.resolve().parent
+def _collect(entry: Path) -> tuple[Path, str, list[BundleModule], set[str]]:
+    entry = entry.resolve()
+    root = entry.parent
     modules: dict[str, BundleModule] = {}
     namespaces: set[str] = set()
-    pending: list[tuple[Path, str, bool]] = [(entry.resolve(), "", False)]
+    pending: list[tuple[Path, str, bool]] = [(entry, "", False)]
     seen: set[Path] = set()
+    entry_code = ""
 
     while pending:
         source_path, name, is_package = pending.pop()
@@ -117,6 +129,8 @@ def _load_module(entry: Path) -> Bundle:
         code = compile_to_python(tree)
         if name:
             modules[name] = BundleModule(name, source_path, code, is_package)
+        else:
+            entry_code = code
 
         expanded = expand_target_blocks(tree, "py")
         for node in _walk_nodes(expanded):
@@ -163,20 +177,27 @@ def _load_module(entry: Path) -> Bundle:
                     pending.append((target_path, module_name, target_is_package))
 
     ordered = sorted(modules.values(), key=lambda m: m.name)
-    return Bundle(_render(entry.resolve(), ordered, namespaces), ordered, namespaces)
+    return entry, entry_code, ordered, namespaces
 
 
 def bundle(entry: Path) -> Bundle:
     """Compile `entry` and its relative `.myna` imports into one standalone script."""
-    return _load_module(entry)
+    entry, entry_code, modules, namespaces = _collect(entry)
+    return Bundle(_render_script(entry, entry_code, modules, namespaces), modules, namespaces)
 
 
-def _render(entry: Path, modules: list[BundleModule], namespaces: set[str]) -> str:
-    # The entry is compiled separately so `myna bundle` fails early on its errors, and so
-    # `__name__ == "__main__"` keeps working in the artifact.
-    entry_tree = _parse_module(entry)
-    entry_code = compile_to_python(entry_tree)
+def bundle_zipapp(entry: Path) -> Zipapp:
+    """Compile `entry` and its relative imports into a runnable `.pyz` archive."""
+    _entry, entry_code, modules, namespaces = _collect(entry)
+    return Zipapp(_render_zipapp(entry_code, modules, namespaces), modules, namespaces)
 
+
+def _render_script(
+    entry: Path,
+    entry_code: str,
+    modules: list[BundleModule],
+    namespaces: set[str],
+) -> str:
     module_lines = [
         f"    {m.name!r}: ({str(m.source_path)!r}, {m.is_package!r}, {m.code!r}),"
         for m in modules
@@ -249,3 +270,40 @@ def _main():
 if __name__ == "__main__":
     _main()
 '''
+
+
+_ZIPAPP_SHEBANG = b"#!/usr/bin/env python3\n"
+_ZIPAPP_PACKAGE = "_myna_app"
+_ZIPAPP_MAIN = f'''import runpy
+
+runpy.run_module("{_ZIPAPP_PACKAGE}.main", run_name="__main__", alter_sys=True)
+'''
+
+
+def _archive_path(module: BundleModule) -> str:
+    base = f"{_ZIPAPP_PACKAGE}/" + module.name.replace(".", "/")
+    return base + "/__init__.py" if module.is_package else base + ".py"
+
+
+def _render_zipapp(
+    entry_code: str, modules: list[BundleModule], namespaces: set[str]
+) -> bytes:
+    files: dict[str, bytes] = {
+        "__main__.py": _ZIPAPP_MAIN.encode("utf-8"),
+        f"{_ZIPAPP_PACKAGE}/__init__.py": b"",
+        f"{_ZIPAPP_PACKAGE}/main.py": entry_code.encode("utf-8"),
+    }
+    for module in modules:
+        files[_archive_path(module)] = module.code.encode("utf-8")
+    for namespace in sorted(namespaces):
+        base = f"{_ZIPAPP_PACKAGE}/" + namespace.replace(".", "/")
+        files.setdefault(base + "/__init__.py", b"")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in sorted(files):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, files[name])
+    return _ZIPAPP_SHEBANG + buffer.getvalue()
