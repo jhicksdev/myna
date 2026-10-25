@@ -1,5 +1,10 @@
 # Myna (`myna-lang`)
 
+[![PyPI](https://img.shields.io/pypi/v/myna-lang?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/myna-lang/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/myna-lang?style=flat-square&label=downloads)](https://pypi.org/project/myna-lang/)
+[![Python versions](https://img.shields.io/pypi/pyversions/myna-lang?style=flat-square&logo=python&logoColor=white)](https://pypi.org/project/myna-lang/)
+[![License: MIT](https://img.shields.io/github/license/jhicksdev/myna?style=flat-square&color=yellow)](https://github.com/jhicksdev/myna/blob/main/LICENSE)
+
 **Myna** is an ultra-dense, symbol-based, AI-native programming language designed to cut LLM token and character usage by **~50%** while transpiling 1:1 to **Python 3.12+** and **JavaScript (ES2024+)**—and decompiling existing Python code back into Myna.
 
 ---
