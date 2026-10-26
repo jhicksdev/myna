@@ -1,12 +1,19 @@
-# Myna Language Specification (v0.1)
+# Myna Language Specification (v0.4)
 
-**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to minimize LLM token consumption while mapping 1-to-1 onto the semantics of **Python 3.12+** and **JavaScript (ES2024+)**.
+**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to minimize LLM token consumption while mapping 1-to-1 onto the semantics of **Python 3.12+** (normative) and a portable subset of **JavaScript (ES2024+)**.
 
 ## 1. Core Design Principles
 1. **Tokenizer-Aware ASCII Sigils:** Uses standard printable ASCII characters and 2-character digraphs (`~@`, `!!`, `<-`, `|>`, `:?`, `??`, `..`) that BPE tokenizers encode as 1–2 tokens. Never uses esoteric Unicode math symbols that split into multi-byte tokens.
 2. **Statement-Prefix vs. Infix Disambiguation:** Punctuation at the start of a statement acts as a structural keyword (`?` = `if`, `%` = `for/while`, `^` = `return`, `!` = `try/raise/assert`, `<` = `import`), while inside an expression it acts as a standard operator.
 3. **Brace-Delimited & Whitespace-Agnostic:** Blocks are enclosed in `{ ... }`. Statements end at a newline `\n`, semicolon `;`, or before `}`. Zero indentation tokens are required.
-4. **Cross-Target AST:** Every Myna construct maps deterministically to both Python and JavaScript.
+4. **Cross-Target AST:** Every Myna construct maps deterministically to Python; the JavaScript target maps the portable core and rejects the rest explicitly.
+
+### Target semantics
+
+Python 3.12 is the normative semantics. The JavaScript target **emulates** those
+semantics with inlined helpers; a construct that cannot be emulated exactly is rejected
+for `-t js` with `TargetError` rather than approximated. See `DECISIONS.md` D-001 and
+D-002 for the target contract and the JavaScript portable-core scope.
 
 ---
 
@@ -62,7 +69,11 @@
 | `@target(py) { ... }` | compile-time block, emitted only for Python | same (module-level only, imports become top-level) |
 | `+@f(...)` / `+$C` | `def f(...)` + adds to `__all__` | `export function f(...)` / `export class C` |
 
-`@target(...)` with no block must be the first non-docstring statement and declares which targets the file supports; compiling for another target raises `TargetError`. With a block it selects the statements/imports emitted for that target. Target blocks are module-level only in v0.3.
+`@target(...)` with no block must be the first non-docstring statement and declares which targets the file supports; compiling for another target raises `TargetError`. With a block it selects the statements/imports emitted for that target. Target blocks are module-level only.
+
+In language 0.4 a module with no declaration is treated as `@target(py, js)`. Language
+0.5.0 changes that default to `@target(py)`; portability then requires an explicit
+`@target(py, js)` (`DECISIONS.md` D-003).
 
 Relative imports resolve against the entry file's directory when run with `myna run`: `<.util:{f}` loads `util.myna` beside the entry file, and `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package). Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
 
@@ -144,6 +155,9 @@ Relative imports resolve against the entry file's directory when run with `myna 
 | `!& f = open(p) { ... }` | `with open(p) as f:` | `using f = open(p);` |
 | `!& open(p) { ... }` | `with open(p):` |Context block |
 | `!~& f = aopen(p) { ... }` | `async with aopen(p) as f:` | `await using f = aopen(p);` |
+
+`try` requires at least one `!!` handler or a `!:` finally block. A try-else (`!?`) is
+only valid when the try has at least one handler.
 
 ---
 

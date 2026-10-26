@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zipfile
 
+import myna
 from myna import DecompileError, ParseError, TargetError, myna_to_js, myna_to_python, python_to_myna
 
 
@@ -447,6 +448,41 @@ class TestMynaTranspiler(unittest.TestCase):
         ns = self.exec_myna('raw = 0b"a\\x80\\377"\ntext = 0b"é"\n')
         self.assertEqual(ns["raw"], b"a\x80\xff")
         self.assertEqual(ns["text"], "é".encode("utf-8"))
+
+    def test_cli_version(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "myna", "--version"],
+            cwd=pathlib.Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"myna {myna.__version__}", proc.stdout)
+        self.assertIn(f"language {myna.LANGUAGE_VERSION}", proc.stdout)
+
+    def test_js_rejects_unemulable_constructs(self):
+        cases = {
+            "multiple inheritance": "$A{_}\n$B{_}\n$C < A, B {_}\n",
+            "relative import": "<.util:{f}\n",
+            "unsupported builtin": '@main { p(@open("x")) }\n',
+            "method decorator": "$C { #[dec]\n @f { ^1 } }\n",
+            "class decorator": "#[dec]\n$C { _ }\n",
+        }
+        for label, src in cases.items():
+            with self.subTest(construct=label):
+                with self.assertRaises(TargetError):
+                    myna_to_js(src)
+
+    def test_try_requires_handler_or_finally(self):
+        for src in ("!{ _ } !? { _ }\n", "!{ _ }\n"):
+            with self.subTest(src=src):
+                with self.assertRaises(ParseError):
+                    myna_to_python(src)
+        # finally-only try blocks remain valid
+        self.assertEqual(
+            myna_to_python("!{ p(1) } !: { p(2) }\n"),
+            "try:\n    print(1)\nfinally:\n    print(2)\n",
+        )
 
     def test_decompile_error_on_unsupported_construct(self):
         unsupported = [

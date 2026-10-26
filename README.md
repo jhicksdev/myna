@@ -5,7 +5,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/myna-lang?style=flat-square&logo=python&logoColor=white)](https://pypi.org/project/myna-lang/)
 [![License: MIT](https://img.shields.io/github/license/jhicksdev/myna?style=flat-square&color=yellow)](https://github.com/jhicksdev/myna/blob/main/LICENSE)
 
-**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to cut LLM token and character usage by **~50%** while transpiling 1:1 to **Python 3.12+** and **JavaScript (ES2024+)**—and decompiling existing Python code back into Myna.
+**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to cut LLM token and character usage by **~50%** while transpiling 1:1 to **Python 3.12+** and to a bounded **JavaScript (ES2024+)** target—and decompiling existing Python code back into Myna.
 
 ---
 
@@ -67,7 +67,7 @@ $$Task(id:i,title:s,priority:i=1,done:b=F){
 
 ## Quickstart
 
-Myna requires **Python 3.11+** and has **zero external dependencies**.
+The CLI requires **Python 3.11+** and has **zero external dependencies**. Generated Python targets **3.12+** when the source declares a type alias (`$=` emits `type X = ...`); other output runs on 3.11+.
 
 ```bash
 # Install from PyPI
@@ -75,6 +75,9 @@ pip install myna-lang          # or: uv tool install myna-lang / pipx install my
 
 # Install for local development (from a checkout)
 pip install -e .
+
+# Show the package and language versions
+myna --version
 
 # Create and run a script
 printf 'p(`hello from {1+1}`)\n' > hello.myna
@@ -142,8 +145,33 @@ p(slug("Hello World"))
   entry file as `<name>.pyz`.
 - `myna compile` still compiles one file at a time. If you use relative imports, the
   emitted `.py` files must be placed in a matching Python package.
-- `myna run -t js` is single-file for now; multi-file resolution and bundling are
-  Python-target only.
+- `myna run -t js` is single-file; relative imports are a compile error for the
+  JavaScript target, and multi-file resolution and bundling are Python-target only.
+
+### JavaScript target
+
+`myna compile -t js` and `myna run -t js` emit ES modules. JavaScript is a **bounded
+target**: Myna semantics are Python semantics, so the generator inlines `__myna_*`
+helpers for truthiness, equality, `%`, `//`, `#`, `<-`, indexing, slicing, and printing.
+
+Unsupported constructs fail with a compile-time `TargetError` instead of producing wrong
+output:
+
+- relative imports and multi-file bundling;
+- multiple inheritance, class decorators, and method decorators;
+- builtins with no faithful JavaScript equivalent (`@open`, `@ord`, `@id`, …);
+- Python standard-library imports (they are not rewritten for Node).
+
+Known representation limits: JavaScript has one number type (no `int`/`float` split or
+arbitrary-precision integers), tuples and lists are both arrays, dictionary keys are
+JavaScript property names (string-coerced), `with` is approximated
+with `try`/`finally` + `.close()`, keyword arguments to user functions become a trailing
+object, f-string format specs beyond `.Nf` are not translated, `===` maps to `Object.is`
+(so primitive identity compares by value), ordered comparisons use JavaScript coercion
+when operand types differ, and bitwise operators use 32-bit JavaScript semantics.
+`myna targets` reports
+whether a file *generates* for a target; the test suite also executes the Node output and
+runs `node --check` on every generated file.
 
 ---
 
@@ -197,6 +225,12 @@ See [`SPEC.md`](https://github.com/jhicksdev/myna/blob/main/SPEC.md) for the com
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+---
+
+## Versioning & Design Decisions
+
+Releases follow the policy in [`VERSIONING.md`](https://github.com/jhicksdev/myna/blob/main/VERSIONING.md): during 0.x, patches are correctness fixes and release hygiene, minors carry new syntax, new capabilities, or intentional behavior changes, and 1.0 is gated on a documented, executable parity matrix. The accepted decisions behind the targets are recorded in [`DECISIONS.md`](https://github.com/jhicksdev/myna/blob/main/DECISIONS.md).
 
 ---
 

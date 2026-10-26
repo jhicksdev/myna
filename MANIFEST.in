@@ -2,6 +2,8 @@ include LICENSE
 include README.md
 include CHANGELOG.md
 include SPEC.md
+include VERSIONING.md
+include DECISIONS.md
 recursive-include examples *.myna
 recursive-include skills *.md
 recursive-include tests *.py

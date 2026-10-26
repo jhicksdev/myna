@@ -10,7 +10,18 @@ import types
 import uuid
 from pathlib import Path
 
-from myna import DecompileError, LexError, ParseError, TargetError, myna_to_python, myna_to_js, parse, python_to_myna
+from myna import (
+    LANGUAGE_VERSION,
+    DecompileError,
+    LexError,
+    ParseError,
+    TargetError,
+    __version__,
+    myna_to_python,
+    myna_to_js,
+    parse,
+    python_to_myna,
+)
 import myna.ast_nodes as ast
 from myna.bundler import BundleError, bundle, bundle_zipapp
 from myna.loader import compile_myna_source, install
@@ -218,6 +229,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="myna",
         description="Myna: Ultra-dense AI-friendly language that transpiles to/from Python",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"myna {__version__} (language {LANGUAGE_VERSION})",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

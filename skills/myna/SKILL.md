@@ -18,7 +18,13 @@ python3 -m myna bundle script.myna -o app.py      # Bundle relative imports into
 python3 -m myna bundle script.myna --zipapp -o app.pyz  # ...or a runnable, reproducible .pyz archive
 python3 -m myna targets script.myna               # Report declared/inferred target support
 python3 -m myna stats file.py --show              # Measure token & character savings
+python3 -m myna --version                         # Package + language version
 ```
+
+The JavaScript target is bounded and single-file: Python semantics are emulated with
+inline helpers, while relative imports, multiple inheritance, class/method decorators,
+and builtins without a faithful JS equivalent raise `TargetError` instead of producing
+wrong output.
 
 ## 2. Complete Symbol Rosetta Stone
 

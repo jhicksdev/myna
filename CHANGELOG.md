@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+## 0.4.1 (2026-10-26)
+
+### Fixed
+
+- JavaScript: `!?` try-else blocks, loop-else (`%:`) blocks, and every `!!` handler are
+  now emitted. Previously the `else` blocks were dropped and only the first handler was
+  generated.
+- JavaScript semantics now match Python for truthiness (`?`, `%?`, `?:`, `!`, `&&`,
+  `||`, comprehension filters), equality (`==`, `!=`, `===`, `!==`), floored `%` and
+  `//`, `#`, `<-`/`!<-`, indexing (including negative indices and missing keys/slices),
+  slicing (including steps), `d$k`/`d$?k`, and `+`/`*` string and list behaviour.
+- JavaScript `@` builtins now work as first-class values and through `|>`: `@sum`,
+  `@srt`, `@enum`, `@zip`, `@map`, `@flt`, `@rev`, `@min`, `@max`, `@all`, `@any`.
+  `@srt` now sorts numbers numerically and honours `reverse=`.
+- JavaScript `p` prints Python-style values (`True`/`False`/`None`, lists, dicts, sets,
+  bytes) instead of `console.log` formatting.
+- JavaScript `del x` no longer emits a strict-mode `delete x` syntax error.
+- JavaScript ranges with negative steps iterate correctly.
+- Bare `!^` inside a renamed `!!` handler re-raises the caught exception.
+- `try` without an `!!` handler or `!:` block, and try-else without `!!`, are now parse
+  errors instead of producing invalid Python.
+- JavaScript rejects multiple inheritance, class/method decorators, relative imports,
+  and builtins with no faithful JavaScript equivalent with `TargetError` instead of
+  emitting wrong output.
+- `myna compile -t js` no longer emits invalid JavaScript for builtin aliases used
+  through `|>`.
+
+### Metadata
+
+- `myna --version` reports the package version and the language version.
+- The version is single-sourced from `myna/__init__.py`; `pyproject.toml` reads it
+  dynamically.
+
+### Documentation
+
+- Add `VERSIONING.md` (release policy) and `DECISIONS.md` (Python is the normative
+  semantics; JavaScript is a bounded portable-core target; `@target` defaults to Python
+  only from 0.5.0).
+- Document the JavaScript target's current scope and limitations in `README.md`, and
+  align `SPEC.md` with language 0.4.
+
 ## 0.4.0 (2026-10-24)
 
 - `myna run` now resolves relative imports (`<.util:{f}`, `<.pkg.mod:{f}`) to sibling

@@ -3,18 +3,33 @@
 from __future__ import annotations
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from myna import myna_to_python, myna_to_js
+from myna import TargetError, myna_to_python, myna_to_js
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @unittest.skipUnless(shutil.which("node"), "node is required for cross-target JavaScript tests")
 class TestMynaJavaScriptTarget(unittest.TestCase):
+    def check_js_syntax(self, js_code: str) -> None:
+        """Every generated file must at least be valid JavaScript."""
+        with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False, encoding="utf-8") as js_tmp:
+            js_tmp.write(js_code)
+            js_path = js_tmp.name
+        try:
+            proc = subprocess.run(["node", "--check", js_path], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, f"invalid generated JS:\n{js_code}\n{proc.stderr}")
+        finally:
+            Path(js_path).unlink(missing_ok=True)
+
     def run_both_targets(self, myna_src: str) -> tuple[str, str]:
         py_code = myna_to_python(myna_src)
         js_code = myna_to_js(myna_src)
+        self.check_js_syntax(js_code)
 
         with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as py_tmp:
             py_tmp.write(py_code)
@@ -25,8 +40,10 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
             js_path = js_tmp.name
 
         try:
-            py_proc = subprocess.run(["python3", py_path], capture_output=True, text=True, check=True)
-            js_proc = subprocess.run(["node", js_path], capture_output=True, text=True, check=True)
+            py_proc = subprocess.run([sys.executable, py_path], capture_output=True, text=True)
+            js_proc = subprocess.run(["node", js_path], capture_output=True, text=True)
+            self.assertEqual(py_proc.returncode, 0, f"python target failed:\n{py_code}\n{py_proc.stderr}")
+            self.assertEqual(js_proc.returncode, 0, f"js target failed:\n{js_code}\n{js_proc.stderr}")
             return py_proc.stdout.strip(), js_proc.stdout.strip()
         finally:
             Path(py_path).unlink(missing_ok=True)
@@ -187,6 +204,300 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         py_out, js_out = self.run_both_targets(src)
         self.assertEqual(py_out, js_out)
         self.assertEqual(js_out, "yes\nyes\nyes\nyes\nno\nno\nyes\nyes")
+
+    def test_cross_target_truthiness_and_equality(self):
+        src = """
+        @main {
+            vals = [[], {}, "", 0, "x", {k: 1}, [1]]
+            % v <- vals { p(v ? "T" : "F") }
+            p(![])
+            p(![1])
+            p(0 || 5)
+            p(2 || 5)
+            p(0 && 5)
+            p(1 && 5)
+            p(1 == T)
+            p(F == 0)
+            p("1" == 1)
+            p([1, 2] == [1, 2])
+            p({a: 1} == {a: 1})
+            p(N == U)
+            a = [1]
+            b = a
+            c = [1]
+            p(a === b)
+            p(a === c)
+            p(a !== c)
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(
+            js_out,
+            "\n".join(
+                [
+                    "F", "F", "F", "F", "T", "T", "T",
+                    "True", "False", "5", "2", "0", "5",
+                    "True", "True", "False", "True", "True", "True",
+                    "True", "False", "True",
+                ]
+            ),
+        )
+
+    def test_cross_target_arithmetic_and_print_formatting(self):
+        src = """
+        @main {
+            p(-7 % 3)
+            p(7 % -3)
+            p(-7 // 3)
+            p(7 // -3)
+            p(7 / 2)
+            p("a" + "b")
+            p([1] + [2])
+            p("ab" * 2)
+            p([1, 2] * 2)
+            p(T)
+            p(F)
+            p(N)
+            p([1, "a"])
+            p({a: 1})
+            p({1})
+            p(0b"abc")
+            p(@str([1, "a"]))
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(
+            js_out,
+            "\n".join(
+                [
+                    "2",
+                    "-2",
+                    "-3",
+                    "-3",
+                    "3.5",
+                    "ab",
+                    "[1, 2]",
+                    "abab",
+                    "[1, 2, 1, 2]",
+                    "True",
+                    "False",
+                    "None",
+                    "[1, 'a']",
+                    "{'a': 1}",
+                    "{1}",
+                    "b'abc'",
+                    "[1, 'a']",
+                ]
+            ),
+        )
+
+    def test_cross_target_indexing_slicing_and_dict_access(self):
+        src = """
+        @safe_index(i:i)->s {
+            ! { ^ @str([10, 20][i]) } !! e:IndexError { ^ "index" }
+        }
+
+        @safe_key()->s {
+            ! { d = {}; ^ @str(d$nope) } !! e:KeyError { ^ "key" }
+        }
+
+        @main {
+            a = [10, 20, 30]
+            p(a[-1]); p(a[0:2]); p(a[::-1]); p(a[1:]); p(a[:2]); p(a[-2:])
+            p(a[::2]); p(a[2:0:-1])
+            s = "😀ab"
+            p(s[0]); p(s[1:]); p(#s)
+            d = {a: 1}
+            p(d$a); p(d$?z ?? "none"); p(d.get("a")); p(d.get("z", 9))
+            p(safe_index(5)); p(safe_key())
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(
+            js_out,
+            "\n".join(
+                [
+                    "30", "[10, 20]", "[30, 20, 10]", "[20, 30]", "[10, 20]", "[20, 30]",
+                    "[10, 30]", "[30, 20]", "😀", "ab", "3", "1", "none", "1", "9",
+                    "index", "key",
+                ]
+            ),
+        )
+
+    def test_cross_target_exception_handlers_else_and_reraise(self):
+        src = """
+        @classify(k:s)->s {
+            ! {
+                ? k == "v" { !^ ValueError("v") }
+                ? k == "k" { !^ KeyError("k") }
+                !^ RuntimeError("r")
+            } !! e:ValueError { ^ "value" }
+              !! e:KeyError { ^ "key" }
+              !! e:RuntimeError { ^ "runtime" }
+              !! e { ^ "other" }
+        }
+
+        @checked(x:i)->s {
+            ! {
+                ? x > 0 { !^ ValueError("positive") }
+            } !! e:ValueError { ^ "err" } !? { ^ "ok" }
+        }
+
+        @reraise()->s {
+            ! {
+                ! { !^ ValueError("inner") } !! e { !^ }
+            } !! e:ValueError { ^ "reraised" }
+        }
+
+        @either(k:s)->s {
+            ! {
+                ? k == "v" { !^ ValueError("v") }
+                !^ KeyError("k")
+            } !! e:(ValueError, KeyError) { ^ "either" }
+        }
+
+        @unhandled()->s {
+            ! {
+                ! { !^ ValueError("x") } !! e:KeyError { ^ "wrong" }
+            } !! e:ValueError { ^ "propagated" }
+        }
+
+        $AppError < Exception { }
+        @app()->s {
+            ! { !^ AppError("app") } !! e:AppError { ^ @str(e) }
+        }
+
+        @main {
+            p(classify("v")); p(classify("k")); p(classify("x"))
+            p(checked(1)); p(checked(0))
+            p(reraise())
+            p(either("v")); p(either("k"))
+            p(unhandled())
+            p(app())
+            ! { p("try") } !! e { p("except") } !: { p("finally") }
+            ! { p("try2") } !: { p("finally2") }
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(
+            js_out,
+            "\n".join(
+                ["value", "key", "runtime", "err", "ok", "reraised", "either", "either",
+                 "propagated", "app", "try", "finally", "try2", "finally2"],
+            ),
+        )
+
+    def test_cross_target_loop_else(self):
+        src = """
+        @main {
+            % i <- 0..3 { ? i == 5 { ^! } } %: { p("for-else") }
+            % i <- 0..3 { ? i == 2 { ^! } } %: { p("unreachable") }
+            j = 0
+            %? j < 2 { j += 1 } %: { p("while-else") }
+            k = 0
+            %? k < 2 { k += 1; ? k == 1 { ^! } } %: { p("unreachable2") }
+            % i <- 0..2 {
+                % j <- 0..2 { ? j == 1 { ^! } } %: { p("inner-else") }
+            } %: { p("outer-else") }
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "for-else\nwhile-else\nouter-else")
+
+    def test_cross_target_builtin_aliases_as_values(self):
+        src = """
+        @main {
+            p([3, 1, 2] |> @srt)
+            p(@srt([3, 1, 2], reverse=T))
+            p([1, 2, 3] |> @sum)
+            p(@min([3, 1, 2])); p(@max([3, 1, 2]))
+            p(@all([1, 2])); p(@any([0, 2])); p(@all([])); p(@any([]))
+            p(@list(@enum(["a", "b"])) |> @J |> @j |> @str)
+            p(@list(@zip([1, 2, 3], ["a", "b"])) |> @J |> @j |> @str)
+            p(@list(@map(x => x * 2, [1, 2, 3])))
+            p(@list(@flt(x => x > 1, [1, 2, 3])))
+            p(@list(@rev([1, 2, 3])))
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(
+            js_out,
+            "\n".join(
+                [
+                    "[1, 2, 3]", "[3, 2, 1]", "6", "1", "3", "True", "True", "True", "False",
+                    "[[0, 'a'], [1, 'b']]", "[[1, 'a'], [2, 'b']]",
+                    "[2, 4, 6]", "[2, 3]", "[3, 2, 1]",
+                ]
+            ),
+        )
+
+    def test_cross_target_helper_dependencies(self):
+        # `in` needs `eq`, `*` needs `add`; using either alone must still emit its deps.
+        src = """
+        @main {
+            p(1 <- [1, 2])
+            p([1] * 2)
+            p("a" * 0)
+            p(#"😀")
+            x = 1
+            ~x
+            p("deleted")
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "True\n[1, 1]\n\n1\ndeleted")
+
+    def test_cross_target_reserved_identifiers_and_class_fields(self):
+        src = """
+        @apply(default:i)->i { ^ default + 1 }
+
+        $Box {
+            'field holder'
+            value:i = 0
+            @get->i => .value
+        }
+
+        @main {
+            default = 2
+            p(apply(default))
+            p(default)
+            b = Box()
+            p(b.get())
+            p(b.value)
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "3\n2\n0\n0")
+
+    def test_cross_target_range_steps(self):
+        src = """
+        @main {
+            % i <- 3..0..-1 { p(i) }
+            % i <- 0..6..2 { p(i) }
+            % i <- ..3 { p(i) }
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "3\n2\n1\n0\n2\n4\n0\n1\n2")
+
+    def test_examples_generate_valid_javascript(self):
+        for path in sorted((REPO_ROOT / "examples").glob("*.myna")):
+            src = path.read_text(encoding="utf-8")
+            try:
+                js_code = myna_to_js(src)
+            except TargetError:
+                continue
+            with self.subTest(example=path.name):
+                self.check_js_syntax(js_code)
 
 
 if __name__ == "__main__":

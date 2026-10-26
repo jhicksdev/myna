@@ -2,6 +2,8 @@
 
 Myna (package `myna-lang`) is a dense, brace-delimited language that transpiles to/from Python and to JavaScript. Syntax is documented in `SPEC.md` and `skills/myna/SKILL.md`; read one before editing any `.myna` file or language behavior.
 
+`VERSIONING.md` defines how releases are numbered; `DECISIONS.md` records the accepted semantics and target-scope decisions. Read both before changing observable behavior.
+
 ## Commands
 
 ```bash
@@ -12,9 +14,9 @@ python3 -m myna run examples/demo.myna                # smoke-test the CLI + exa
 python3 -m myna stats examples/demo.myna
 ```
 
-- Run from the repo root (imports are absolute `myna.*`) or `pip install -e .`. Python >= 3.11; no runtime dependencies.
-- `tests/test_js.py` shells out to `node` and skips when Node is not on `PATH`.
-- No lint, format, typecheck, or CI config is checked in; unittest is the only verification gate. `.ruff_cache/` is a local artifact, not a configured tool.
+- Run from the repo root (imports are absolute `myna.*`) or `pip install -e .`. Python >= 3.11 for the CLI; generated Python is 3.12+ when the source uses `$=` (it emits a `type` statement). No runtime dependencies.
+- `tests/test_js.py` shells out to `node` and skips when Node is not on `PATH`; CI runs it on Node 20/22/24, so do not accept a local run where it skipped.
+- No lint, format, or typecheck config is checked in; unittest is the verification gate and `.github/workflows/test.yml` runs it on every PR. `.ruff_cache/` is a local artifact, not a configured tool.
 - CLI aliases: `compile`/`c`/`myna2py`/`myna2js`, `decompile`/`d`/`py2myna`, `run`/`r`, `stats`/`s`. Output extension `.js`/`.mjs` selects the JS target only when `-t` is omitted.
 
 ## Architecture
@@ -29,14 +31,15 @@ python3 -m myna stats examples/demo.myna
 
 ## Language-change checklist
 
-- Tests execute generated code and assert semantics, not emitted text. `test_js.py` compiles the same source for Python and Node and compares stdout.
+- Tests execute generated code and assert semantics, not emitted text. `test_js.py` compiles the same source for Python and Node, runs `node --check` on the generated file, executes both, and compares stdout. New constructs need a cross-target case there or an explicit `TargetError` test in `test_myna.py`.
 - Syntax is duplicated in three docs that must stay consistent: the README cheat sheet, `SPEC.md`, and `skills/myna/SKILL.md`.
 - `examples/*.myna` double as `myna stats` fixtures; keep them compilable.
-- The version is duplicated in `pyproject.toml` and `myna/__init__.py`; bump both together and add a `CHANGELOG.md` entry.
-- Target blocks are module-level only (v0.3); imports inside them are emitted at module top level.
+- Version bumps follow `VERSIONING.md` §2–§3: classify the change in `CHANGELOG.md` first, then apply the bump the categories imply. The version lives in `myna/__init__.py:__version__`; `pyproject.toml` reads it dynamically, so never edit a literal version there.
+- Target blocks are module-level only; imports inside them are emitted at module top level.
 
 ## Gotchas
 
 - `myna stats` soft-imports `tiktoken` and otherwise uses a calibrated `bpe-approx` estimator. The README benchmark numbers match the `bpe-approx` fallback, so installing `tiktoken` changes reported counts; `tiktoken` is not a declared dependency.
+- `myna targets` reports whether code *generates*, not whether it *runs*. The JS backend emulates Python semantics through inlined `__myna_*` helpers and rejects unemulable constructs (multiple inheritance, class/method decorators, relative imports, some builtins) with `TargetError`. Remaining known limits: JS has one number type (no int/float or >2^53 integers), tuples and lists are both arrays, `with` is approximated, keyword arguments to user functions become a trailing object, and f-string format specs beyond `.Nf` are not translated. D-001/D-002 in `DECISIONS.md` define the target contract.
 - `myna run` for Python execs the compiled code in-process with `__name__ == "__main__"`, so top-level `@main` blocks run.
 - Don't add runtime dependencies casually; the project advertises zero deps and optional `tiktoken` only soft-imports.

@@ -655,6 +655,11 @@ class Parser:
                 self.pos = saved_pos
                 break
 
+        if else_body is not None and not handlers:
+            raise ParseError("try-else requires at least one '!!' handler", tok)
+        if not handlers and finally_body is None:
+            raise ParseError("try requires an '!!' handler or '!:' finally block", tok)
+
         return ast.TryStmt(
             body=body,
             handlers=handlers,
