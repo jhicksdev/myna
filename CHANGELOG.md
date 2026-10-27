@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.2 (2026-10-27)
+
 ### Fixed
 
 - The Python-to-Myna decompiler's compact mode no longer inlines a string-bearing
