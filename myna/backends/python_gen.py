@@ -473,6 +473,99 @@ class PythonGenerator:
             return ", ".join(self.gen_expr(e) for e in expr.elts)
         return self.gen_expr(expr)
 
+    # Delimiters a Python 3.11 f-string may use, most conventional first.
+    # Triple quotes allow the same quote character inside an interpolation.
+    _FSTRING_DELIMITERS = ('"', "'", '"""', "'''")
+
+    @staticmethod
+    def _escape_fstring_literal(text: str, quote: str) -> str:
+        """Escape literal f-string text for a 3.11-compatible f-string.
+
+        A backslash is always escaped, as are braces and the delimiter quote.
+        Escaping every delimiter quote keeps the output valid even for a
+        triple-quoted delimiter, where a raw run of three quotes would close it.
+        """
+        return (
+            text.replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("{", "{{")
+            .replace("}", "}}")
+            .replace(quote, "\\" + quote)
+        )
+
+    @staticmethod
+    def _escape_format_literal(text: str) -> str:
+        """Escape literal text for a ``str.format`` fallback template."""
+        return (
+            text.replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace('"', '\\"')
+            .replace("{", "{{")
+            .replace("}", "}}")
+        )
+
+    def gen_fstring(self, expr: ast.FString) -> str:
+        """Emit an f-string that also compiles on Python 3.11.
+
+        Before PEP 701 (Python 3.12), an interpolation cannot contain a
+        backslash or the delimiter's quote character. Pick a safe delimiter
+        when possible; otherwise fall back to ``str.format`` so runtime values
+        still use ``__format__`` exactly as an f-string would.
+        """
+        rendered: list[str | tuple[str, Optional[str]]] = []
+        interpolations: list[str] = []
+        for p in expr.parts:
+            if isinstance(p, str):
+                rendered.append(p)
+            else:
+                sub_expr, fmt_spec = p
+                sub_s = self.gen_expr(sub_expr)
+                rendered.append((sub_s, fmt_spec))
+                interpolations.append(sub_s)
+
+        if all("\\" not in sub_s for sub_s in interpolations):
+            for delim in self._FSTRING_DELIMITERS:
+                if any(delim in sub_s for sub_s in interpolations):
+                    continue
+                body: list[str] = []
+                for p in rendered:
+                    if isinstance(p, str):
+                        body.append(self._escape_fstring_literal(p, delim[0]))
+                    else:
+                        sub_s, fmt_spec = p
+                        if fmt_spec is not None:
+                            body.append(f"{{{sub_s}:{fmt_spec}}}")
+                        else:
+                            body.append(f"{{{sub_s}}}")
+                return f"f{delim}{''.join(body)}{delim}"
+
+        # Fallback for interpolations that cannot appear in a 3.11 f-string.
+        # ``str.format`` applies the same __format__ protocol as an f-string.
+        template: list[str] = []
+        args: list[str] = []
+        for p in rendered:
+            if isinstance(p, str):
+                template.append(self._escape_format_literal(p))
+                continue
+            sub_s, fmt_spec = p
+            index = len(args)
+            args.append(sub_s)
+            if fmt_spec is not None:
+                spec = (
+                    fmt_spec.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\r", "\\r")
+                )
+                template.append(f"{{{index}:{spec}}}")
+            else:
+                template.append(f"{{{index}}}")
+        if not args:
+            return f'"{"".join(template)}"'
+        return f'"{"".join(template)}".format({", ".join(args)})'
+
     def gen_expr(self, expr: ast.Expr, parent_prec: int = 0) -> str:
         if isinstance(expr, ast.Literal):
             if expr.kind == "ellipsis":
@@ -489,19 +582,7 @@ class PythonGenerator:
             return repr(expr.value)
 
         if isinstance(expr, ast.FString):
-            buf: list[str] = []
-            for p in expr.parts:
-                if isinstance(p, str):
-                    escaped = p.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("{", "{{").replace("}", "}}")
-                    buf.append(escaped)
-                else:
-                    sub_expr, fmt_spec = p
-                    sub_s = self.gen_expr(sub_expr)
-                    if fmt_spec:
-                        buf.append(f"{{{sub_s}:{fmt_spec}}}")
-                    else:
-                        buf.append(f"{{{sub_s}}}")
-            return f'f"{"".join(buf)}"'
+            return self.gen_fstring(expr)
 
         if isinstance(expr, ast.Ident):
             if expr.name in ("@j", "@J"):

@@ -97,6 +97,10 @@ class _DeadLocalInliner(py_ast.NodeTransformer):
                 and i + 1 < len(stmts)
                 and self._reads_var_directly(stmts[i + 1], var_name)
                 and not any(isinstance(n, py_ast.JoinedStr) for n in py_ast.walk(rhs_val))
+                and not (
+                    self._is_read_in_fstring(stmts[i + 1], var_name)
+                    and self._has_string_literal(rhs_val)
+                )
             ):
                 stmts[i + 1] = self._replace_var(stmts[i + 1], var_name, rhs_val)
                 i += 1
@@ -106,6 +110,33 @@ class _DeadLocalInliner(py_ast.NodeTransformer):
             out.append(cur)
             i += 1
         return out
+
+    def _is_read_in_fstring(self, stmt: py_ast.stmt, var_name: str) -> bool:
+        """True when ``var_name`` is loaded inside an f-string interpolation."""
+        for node in py_ast.walk(stmt):
+            if not isinstance(node, py_ast.JoinedStr):
+                continue
+            for sub in py_ast.walk(node):
+                if (
+                    isinstance(sub, py_ast.Name)
+                    and sub.id == var_name
+                    and isinstance(sub.ctx, py_ast.Load)
+                ):
+                    return True
+        return False
+
+    @staticmethod
+    def _has_string_literal(expr: py_ast.expr) -> bool:
+        """Detect literals that may need PEP 701 quoting if moved inside ``{...}``.
+
+        Generated Python targets 3.11+, where an f-string expression cannot
+        reuse the outer quote character or contain a backslash.  Keeping such a
+        value in its own temporary avoids emitting 3.12-only syntax.
+        """
+        return any(
+            isinstance(node, py_ast.Constant) and isinstance(node.value, (str, bytes))
+            for node in py_ast.walk(expr)
+        )
 
     def _reads_var_directly(self, stmt: py_ast.stmt, var_name: str) -> bool:
         # Don't inline into loops or nested function/class defs where evaluation count changes
