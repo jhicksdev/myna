@@ -221,6 +221,18 @@ class TestMynaTranspiler(unittest.TestCase):
             myna_to_python(src)
         self.assertEqual(ctx.exception.token.line, 3)
 
+    def test_fstring_quoting_avoids_python_312_only_syntax(self):
+        src = """
+        d = {"it's": 7}
+        quoted = `v={d["it's"]}`
+        mixed = `both " and ' in {d["it's"]}`
+        escaped = `[{'x\\ny'}]`
+        """
+        ns = self.exec_myna(src)
+        self.assertEqual(ns["quoted"], "v=7")
+        self.assertEqual(ns["mixed"], "both \" and ' in 7")
+        self.assertEqual(ns["escaped"], "[x\ny]")
+
     def test_control_flow_and_loops(self):
         src = """
         @classify(x:i)->s {

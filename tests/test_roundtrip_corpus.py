@@ -251,6 +251,24 @@ def counter(start):
         "counter(10)",
     ),
     (
+        "inline_backslash_literal_into_fstring",
+        """
+def join_with_newline(first, second):
+    separator = "\\n"
+    return f"{first}{separator}{second}"
+""",
+        'join_with_newline("a", "b")',
+    ),
+    (
+        "inline_quoted_literal_into_fstring",
+        """
+def quoted(name):
+    mark = "'"
+    return f"{mark}{name}{mark}"
+""",
+        'quoted("x")',
+    ),
+    (
         "match_statement",
         """
 def describe(value):

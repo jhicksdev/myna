@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- The Python-to-Myna decompiler's compact mode no longer inlines a string-bearing
+  temporary into an f-string interpolation. The emitted f-string needed Python 3.12's
+  PEP 701 quoting rules, so round-tripped output failed to compile on Python 3.11.
+- The Python backend now emits Python 3.11-compatible f-strings when an interpolation
+  contains a quote or backslash, choosing a safe delimiter or falling back to
+  `str.format`. Previously such Myna source produced PEP 701-only output.
+
 ## 0.4.1 (2026-10-26)
 
 ### Fixed
