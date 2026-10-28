@@ -7,10 +7,34 @@ being approximated.
 """
 
 from __future__ import annotations
+import json
+import os
+from pathlib import Path
 from typing import Optional
 
 import myna.ast_nodes as ast
+from myna.modules import (
+    ModuleError,
+    module_bindings,
+    module_classes,
+    resolve_from_import,
+    resolve_module_import,
+)
 from myna.targets import TargetError, enforce_module_target, expand_target_blocks
+
+
+def js_string_literal(value: str) -> str:
+    """Emit a JavaScript string literal for ``value``.
+
+    ``json.dumps`` produces a valid ES string literal for every code point (including
+    ``\\v``/``\\a``, which it escapes as ``\\u0007``/``\\u000b``), unlike Python's
+    ``repr``, which can emit ``\\UXXXXXXXX`` and ``\\N{...}``. Lone surrogates are
+    escaped with ``ensure_ascii`` so the generated file stays writable as UTF-8.
+    """
+    if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+        return json.dumps(value, ensure_ascii=True)
+    encoded = json.dumps(value, ensure_ascii=False)
+    return encoded.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
 # Python exception hierarchy entries that do not exist natively in JavaScript.  The
@@ -104,9 +128,18 @@ HELPERS: dict[str, str] = {
         "function __myna_repr(x) {"
         " if (typeof x === 'string') {"
         "   const q = x.includes(\"'\") && !x.includes('\"') ? '\"' : \"'\";"
-        "   const esc = q === '\"' ? x.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"')"
-        "     : x.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"\\\\'\");"
-        "   return q + esc + q; }"
+        "   let out = '';"
+        "   for (const ch of x) {"
+        "     const c = ch.codePointAt(0);"
+        "     if (ch === '\\\\') out += '\\\\\\\\';"
+        "     else if (ch === q) out += '\\\\' + q;"
+        "     else if (ch === '\\n') out += '\\\\n';"
+        "     else if (ch === '\\r') out += '\\\\r';"
+        "     else if (ch === '\\t') out += '\\\\t';"
+        "     else if (c < 0x20 || (c >= 0x7f && c <= 0x9f))"
+        "       out += '\\\\x' + c.toString(16).padStart(2, '0');"
+        "     else out += ch; }"
+        "   return q + out + q; }"
         " return __myna_str(x); }"
         "function __myna_str(x) {"
         " if (x === true) return 'True';"
@@ -438,7 +471,14 @@ BUILTIN_VALUES: dict[str, str] = {
 
 
 class JSGenerator:
-    def __init__(self, indent_str: str = "  "):
+    def __init__(
+        self,
+        indent_str: str = "  ",
+        *,
+        source_path: Optional[Path] = None,
+        module_ext: str = ".js",
+        import_base: Optional[Path] = None,
+    ):
         self.indent_str = indent_str
         self.indent_level = 0
         self.in_class = False
@@ -449,6 +489,12 @@ class JSGenerator:
         self.loop_stack: list[Optional[str]] = []
         self.loop_counter = 0
         self.exc_var_stack: list[str] = []
+        # Relative-import resolution (`<.util:{f}` -> "./util.js").
+        self.source_path = Path(source_path) if source_path is not None else None
+        self.module_ext = module_ext
+        self.import_base = Path(import_base) if import_base is not None else None
+        self.dependencies: set[Path] = set()
+        self.inline_exports: set[str] = set()
 
     def ind(self) -> str:
         return self.indent_str * self.indent_level
@@ -522,6 +568,17 @@ class JSGenerator:
         for stmt in mod.body:
             lines.extend(self.gen_stmt(stmt))
 
+        # ES modules do not leak bindings: every top-level Python name that another
+        # module can import must be exported. Names already exported inline by `+@`
+        # are skipped so a module never declares the same export twice.
+        export_names = [n for n in module_bindings(mod) if n not in self.inline_exports]
+        if export_names:
+            specs = []
+            for name in export_names:
+                bound = js_ident(name)
+                specs.append(bound if bound == name else f"{bound} as {name}")
+            lines.append(f"export {{ {', '.join(specs)} }};")
+
         helpers = self._helper_lines()
         all_lines = (helpers + [""] + lines) if (helpers and lines) else (helpers + lines)
         return "\n".join(all_lines).rstrip() + "\n"
@@ -533,6 +590,85 @@ class JSGenerator:
                 self.declare(stmt.name)
             elif isinstance(stmt, ast.FuncDef):
                 self.declare(stmt.name)
+
+    # ========================================================================
+    # Relative imports
+    # ========================================================================
+
+    def _require_source_path(self) -> Path:
+        if self.source_path is None:
+            raise TargetError(
+                "relative imports need a source path for the JavaScript target; "
+                "compile the file with `myna compile` (or pass source_path= to "
+                "myna_to_js) so the specifier can be resolved"
+            )
+        return self.source_path
+
+    def _resolve_module_import(self, stmt: ast.ImportStmt, name: str):
+        source = self._require_source_path()
+        try:
+            return resolve_module_import(source, stmt.level, name, root=self.import_base)
+        except ModuleError as exc:
+            raise TargetError(str(exc)) from exc
+
+    def _specifier(self, target: Path) -> str:
+        """Return the relative ES module specifier from this module to ``target``."""
+        source = self._require_source_path()
+        from_js = source.with_suffix(self.module_ext)
+        to_js = target.with_suffix(self.module_ext)
+        spec = os.path.relpath(to_js, start=from_js.parent).replace(os.sep, "/")
+        return spec if spec.startswith(".") else f"./{spec}"
+
+    def _gen_relative_import(self, stmt: ast.ImportFromStmt) -> list[str]:
+        source = self._require_source_path()
+        try:
+            bindings = resolve_from_import(source, stmt, root=self.import_base)
+        except ModuleError as exc:
+            raise TargetError(str(exc)) from exc
+
+        emitted = []
+        for binding in bindings:
+            self.declare(binding.local)
+            if binding.path == source and binding.imported is not None:
+                # `from . import name` inside the same package `__init__`: the name is
+                # already a local binding, and importing the module from itself would
+                # be a duplicate declaration.
+                continue
+            self.dependencies.add(binding.path)
+            if binding.imported is not None and binding.imported in module_classes(
+                binding.path
+            ):
+                # Python classes are callables; JS classes need `new`.
+                self.known_classes.add(binding.local)
+            emitted.append(binding)
+
+        lines: list[str] = []
+        index = 0
+        while index < len(emitted):
+            binding = emitted[index]
+            spec = self._specifier(binding.path)
+            if binding.imported is None:
+                # `from .pkg import submodule` binds the module object itself.
+                lines.append(
+                    f'{self.ind()}import * as {js_ident(binding.local)} from "{spec}";'
+                )
+                index += 1
+                continue
+            named: list[str] = []
+            while (
+                index < len(emitted)
+                and emitted[index].imported is not None
+                and self._specifier(emitted[index].path) == spec
+            ):
+                current = emitted[index]
+                bound = js_ident(current.local)
+                imported = current.imported
+                named.append(imported if bound == imported else f"{imported} as {bound}")
+                index += 1
+            lines.append(
+                f'{self.ind()}import {{ {", ".join(named)} }} from "{spec}";'
+            )
+        return lines
 
     # ========================================================================
     # Statements
@@ -573,15 +709,22 @@ class JSGenerator:
             for a in stmt.names:
                 local = a.asname or a.name.split(".")[-1]
                 self.declare(local)
-                lines.append(f'{self.ind()}import * as {js_ident(local)} from "{a.name}";')
+                if stmt.level:
+                    target = self._resolve_module_import(stmt, a.name)
+                    self.dependencies.add(target.path)
+                    spec = self._specifier(target.path)
+                else:
+                    spec = a.name
+                lines.append(f'{self.ind()}import * as {js_ident(local)} from "{spec}";')
             return lines
 
         if isinstance(stmt, ast.ImportFromStmt):
-            if stmt.level > 0:
+            if any(a.name == "*" for a in stmt.names):
                 raise TargetError(
-                    "relative imports are not supported by the JavaScript target; "
-                    "use an absolute specifier or compile for Python"
+                    "star imports are not supported by the JavaScript target"
                 )
+            if stmt.level > 0:
+                return self._gen_relative_import(stmt)
             mod = stmt.module or ""
             specs: list[str] = []
             for a in stmt.names:
@@ -655,7 +798,10 @@ class JSGenerator:
             return self.gen_with_stmt(stmt)
 
         if isinstance(stmt, ast.MainGuardStmt):
-            lines = [f"{self.ind()}// @main entrypoint", f"{self.ind()}{{"]
+            lines = [
+                f"{self.ind()}// @main entrypoint",
+                f"{self.ind()}if (import.meta.filename === process.argv[1]) {{",
+            ]
             lines.extend(self.gen_block(stmt.body))
             lines.append(f"{self.ind()}}}")
             return lines
@@ -731,6 +877,8 @@ class JSGenerator:
     def gen_func_def(self, fn: ast.FuncDef) -> list[str]:
         self.declare(fn.name)
         export_prefix = "export " if (fn.exported and self.indent_level == 0) else ""
+        if export_prefix:
+            self.inline_exports.add(fn.name)
         async_prefix = "async " if fn.is_async else ""
         star_suffix = "*" if fn.is_generator else ""
 
@@ -795,6 +943,8 @@ class JSGenerator:
         self.declare(cls.name)
         self.known_classes.add(cls.name)
         export_prefix = "export " if (cls.exported and self.indent_level == 0) else ""
+        if export_prefix:
+            self.inline_exports.add(cls.name)
         ext_part = ""
         if cls.bases:
             base = cls.bases[0]
@@ -1108,6 +1258,8 @@ class JSGenerator:
                 return "true" if expr.value else "false"
             if expr.kind == "bytes":
                 return f"new Uint8Array([{', '.join(str(ord(c)) for c in expr.value)}])"
+            if isinstance(expr.value, str):
+                return js_string_literal(expr.value)
             return repr(expr.value)
 
         if isinstance(expr, ast.FString):
@@ -1486,7 +1638,39 @@ class JSGenerator:
         return f"{iter_s}.flatMap({param_s} => {inner})"
 
 
-def compile_to_js(mod: ast.Module) -> str:
+def compile_to_js(
+    mod: ast.Module,
+    *,
+    source_path: Path | str | None = None,
+    module_ext: str = ".js",
+    import_base: Path | str | None = None,
+) -> str:
+    """Generate one ES module.
+
+    ``source_path`` is the `.myna` file being compiled. It is required for relative
+    imports: it decides where they are resolved and the ``./x.js`` specifiers emitted.
+    ``import_base`` overrides the resolution base for a program's entry file (the
+    ``--module-root`` case). ``module_ext`` is the extension of the generated files.
+    """
     enforce_module_target(mod, "js")
-    gen = JSGenerator()
+    gen = JSGenerator(
+        source_path=source_path, module_ext=module_ext, import_base=import_base
+    )
     return gen.generate(expand_target_blocks(mod, "js"))
+
+
+def compile_module_js(
+    mod: ast.Module,
+    *,
+    source_path: Path | str | None = None,
+    module_ext: str = ".js",
+    import_base: Path | str | None = None,
+) -> tuple[str, list[Path]]:
+    """Generate one ES module and return it with the files it relatively imports."""
+    enforce_module_target(mod, "js")
+    gen = JSGenerator(
+        source_path=source_path, module_ext=module_ext, import_base=import_base
+    )
+    code = gen.generate(expand_target_blocks(mod, "js"))
+    return code, sorted(gen.dependencies)
+

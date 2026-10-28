@@ -131,33 +131,52 @@ p(slug("Hello World"))
 @slug(text:s)->s { ^ text.lower().replace(" ", "-") }
 ```
 
-- `<.util:{slug}` → `util.myna` beside the entry file.
+- `<.util:{slug}` → `util.myna` beside the importing module.
 - `<.pkg.helper:{parse}` → `pkg/helper.myna`; `pkg` may have an `__init__.myna` or be a
   plain directory (namespace package).
+- `<.util` (no `{...}` list) binds the imported module object.
 - Absolute imports (`<json`, `<mypkg>alias`) keep their normal Python meaning.
 - Imported files are compiled on first import and cached by Python's import system.
+- `myna run --module-root DIR` (or `MYNA_MODULE_ROOT=DIR`) resolves the **entry file's**
+  relative imports from `DIR` instead of the entry's own directory. For the usual
+  `src/` + `tests/` layout this removes the need for a symlink:
+
+  ```bash
+  python3 -m myna run --module-root . tests/run_tests.myna
+  ```
+
+  Modules imported from that root still resolve their own relative imports from their own
+  directory. With a module root set, the entry's own directory is not searched, so a
+  file beside the entry is imported by its path from the root (e.g. `<.tests.harness`).
 - `myna bundle src/main.myna -o app.py` embeds the whole relative-import graph in one
   standalone Python file. It runs with a plain `python3` and does not need `myna`
   installed; absolute imports still come from the environment.
 - `myna bundle src/main.myna --zipapp -o app.pyz` writes a runnable, executable zipapp
   containing real module files (`python3 app.pyz`). It is reproducible: rebuilding the
   same sources produces identical bytes. Without `-o`, the archive lands next to the
-  entry file as `<name>.pyz`.
+  entry file as `<name>.pyz`. `--module-root` applies to bundling too.
 - `myna compile` still compiles one file at a time. If you use relative imports, the
   emitted `.py` files must be placed in a matching Python package.
-- `myna run -t js` is single-file; relative imports are a compile error for the
-  JavaScript target, and multi-file resolution and bundling are Python-target only.
+- For `-t js`, each relative import becomes a relative ES module specifier
+  (`./util.js`, or `./util.mjs` when the output ends in `.mjs`) and every top-level
+  binding is exported. Compile the files into a mirrored tree, or let
+  `myna run -t js` do it. Node treats a `.js` file containing `import`/`export` as
+  CommonJS unless the project sets `"type": "module"`, so prefer `.mjs` outputs or add
+  that to the project's `package.json`. `myna bundle` remains Python-only.
 
 ### JavaScript target
 
 `myna compile -t js` and `myna run -t js` emit ES modules. JavaScript is a **bounded
 target**: Myna semantics are Python semantics, so the generator inlines `__myna_*`
 helpers for truthiness, equality, `%`, `//`, `#`, `<-`, indexing, slicing, and printing.
+The runtime floor is Node 20.11+ (`import.meta.filename` backs the `@main` guard).
 
 Unsupported constructs fail with a compile-time `TargetError` instead of producing wrong
 output:
 
-- relative imports and multi-file bundling;
+- single-file bundling for JavaScript (`myna bundle` is Python-only; use
+  `myna compile -t js` over the tree or `myna run -t js`);
+- star imports (`<math:{*}`);
 - multiple inheritance, class decorators, and method decorators;
 - builtins with no faithful JavaScript equivalent (`@open`, `@ord`, `@id`, …);
 - Python standard-library imports (they are not rewritten for Node).
@@ -169,6 +188,8 @@ with `try`/`finally` + `.close()`, keyword arguments to user functions become a 
 object, f-string format specs beyond `.Nf` are not translated, `===` maps to `Object.is`
 (so primitive identity compares by value), ordered comparisons use JavaScript coercion
 when operand types differ, and bitwise operators use 32-bit JavaScript semantics.
+`@main` compiles to an `import.meta.filename === process.argv[1]` guard (Node's `__main__`
+equivalent), so an imported module's entry block stays dormant.
 `myna targets` reports
 whether a file *generates* for a target; the test suite also executes the Node output and
 runs `node --check` on every generated file.

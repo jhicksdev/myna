@@ -22,7 +22,8 @@ python3 -m myna stats examples/demo.myna
 ## Architecture
 
 - Myna -> target: `lexer.py` (tokens) -> `parser.py` (recursive descent + Pratt) -> `ast_nodes.py` -> `backends/python_gen.py` or `backends/js_gen.py`.
-- `myna run` for the Python target installs `myna/loader.py`, a scoped import hook that resolves relative imports to sibling `.myna` modules; `myna compile` does not bundle imports.
+- `myna run` for the Python target installs `myna/loader.py`, a scoped import hook that resolves relative imports to sibling `.myna` modules; `--module-root DIR` / `MYNA_MODULE_ROOT` changes the entry file's import base. `myna compile` does not bundle imports.
+- Relative imports are supported for `-t js` as multi-file ES modules: `myna/backends/js_gen.py` resolves them through `myna/modules.py` and emits `./name.js`/`./name.mjs` specifiers plus a trailing export list, and `myna/js_modules.py` compiles the graph for `myna run -t js` (D-005). `myna bundle` remains Python-only.
 - `myna bundle` (`bundler.py`) compiles the relative-import graph into one standalone Python file with embedded module sources, or a reproducible `.pyz` zipapp with real module files.
 - Python -> Myna: `frontends/python_decompile.py` uses Python's stdlib `ast`; it does not go through the Myna lexer/parser. `test_roundtrip_py_to_myna_to_py` and `test_roundtrip_corpus.py` are the contract.
 - Adding a construct means touching lexer + parser + both backends. Each generator raises `ValueError("Unsupported ... node")` for unhandled AST nodes, so JS/Python parity gaps surface only when exercised.
@@ -40,6 +41,6 @@ python3 -m myna stats examples/demo.myna
 ## Gotchas
 
 - `myna stats` soft-imports `tiktoken` and otherwise uses a calibrated `bpe-approx` estimator. The README benchmark numbers match the `bpe-approx` fallback, so installing `tiktoken` changes reported counts; `tiktoken` is not a declared dependency.
-- `myna targets` reports whether code *generates*, not whether it *runs*. The JS backend emulates Python semantics through inlined `__myna_*` helpers and rejects unemulable constructs (multiple inheritance, class/method decorators, relative imports, some builtins) with `TargetError`. Remaining known limits: JS has one number type (no int/float or >2^53 integers), tuples and lists are both arrays, `with` is approximated, keyword arguments to user functions become a trailing object, and f-string format specs beyond `.Nf` are not translated. D-001/D-002 in `DECISIONS.md` define the target contract.
+- `myna targets` reports whether code *generates*, not whether it *runs*. The JS backend emulates Python semantics through inlined `__myna_*` helpers and rejects unemulable constructs (multiple inheritance, class/method decorators, star imports, some builtins) with `TargetError`. Remaining known limits: JS has one number type (no int/float or >2^53 integers), tuples and lists are both arrays, `with` is approximated, keyword arguments to user functions become a trailing object, and f-string format specs beyond `.Nf` are not translated. D-001/D-002/D-005 in `DECISIONS.md` define the target contract.
 - `myna run` for Python execs the compiled code in-process with `__name__ == "__main__"`, so top-level `@main` blocks run.
 - Don't add runtime dependencies casually; the project advertises zero deps and optional `tiktoken` only soft-imports.

@@ -56,7 +56,8 @@ with `TargetError` — never silently approximated.
 
 ## D-002 — JavaScript is a bounded second target at 1.0
 
-**Status:** Accepted — 2026-10-26
+**Status:** Accepted — 2026-10-26. The packaging rules for relative imports and
+`myna run -t js` are superseded by D-005 (2026-10-28); the rest remains normative.
 
 ### Context
 
@@ -98,7 +99,7 @@ Python remains the primary target: everything documented must work there.
 
 ## D-003 — `@target` defaults to Python only
 
-**Status:** Accepted — 2026-10-26; scheduled for 0.5.0
+**Status:** Accepted — 2026-10-26; deferred to 0.6.0 (2026-10-28)
 
 ### Context
 
@@ -109,8 +110,10 @@ misbehaves only when someone tries it.
 ### Decision
 
 The default becomes `@target(py)`. Claiming portability requires an explicit
-`@target(py, js)`. This is a breaking change, so it ships in a minor (0.5.0) with a
-deprecation note and a migration line in `CHANGELOG.md`.
+`@target(py, js)`. This is a breaking change, so it ships in a minor (0.6.0) with a
+deprecation note and a migration line in `CHANGELOG.md`. The deprecation is announced in
+0.5.0; the flip was deferred from 0.5.0 so that release could ship the JavaScript
+relative-import work (D-005) without an unrelated language-wide breaking change.
 
 ### Consequences
 
@@ -133,3 +136,52 @@ deprecation note and a migration line in `CHANGELOG.md`.
 The rules for patch/minor/major bumps, changelog categories, the release procedure, and
 the 1.0 gate live in [`VERSIONING.md`](VERSIONING.md). This entry exists so the policy is
 discoverable from the decision log.
+
+---
+
+## D-005 — JavaScript relative imports are multi-file ES modules
+
+**Status:** Accepted — 2026-10-28
+**Supersedes:** D-002's "Single-file ESM only" packaging rule and its
+"Relative-import resolution and JS bundling are explicitly post-1.0 (1.x)" bullet, for
+relative-import resolution only.
+
+### Context
+
+D-002 kept the JavaScript target single-file and deferred relative-import resolution to
+1.x. A downstream project (`myna-lang` 0.4.2, `GAPS.md` G2) found that this blocked the
+"compile the portable core to JavaScript" path entirely: modules that avoid Python-only
+APIs and declare `@target(py, js)` still could not be compiled because their import graph
+did not fit in one file.
+
+### Decision
+
+Relative imports are part of the JavaScript target:
+
+- `<.util:{slug}` compiles to `import { slug } from "./util.js"`; the specifier mirrors
+  the source tree and uses the extension of the output file (`-o app.mjs` → `./util.mjs`).
+- Every top-level binding is exported so relative imports behave like Python's: a module
+  can import any name it could import on the Python target. `+@`/`+$` continue to emit
+  inline `export` declarations.
+- `myna run -t js` compiles the reachable relative-import graph into a temporary tree and
+  runs the entry with Node, so multi-file programs execute.
+- `myna_to_js(source)` has no filesystem context, so it requires `source_path=` (or a
+  `myna compile` of the file) when relative imports are present.
+
+Single-file JavaScript **bundling** remains out of scope (`myna bundle` is Python-only);
+the supported JavaScript unit is a tree of ES modules. Namespace imports and import
+cycles follow Node's ESM semantics, not Python's partially-initialized modules.
+
+### Consequences
+
+- `node --check` must pass for every generated module, and cross-target tests must
+  execute a compiled multi-file tree.
+- The generated files must be written as siblings preserving their relative layout;
+  `myna compile` remains per-file.
+- `myna targets` reports relative imports as supported for `js`.
+- The JavaScript runtime floor is Node 20.11+ (`import.meta.filename` backs the `@main`
+  guard, matching Python's `__name__ == "__main__"`), which is a minor change under
+  `VERSIONING.md` §6.
+- This is a new target capability, so it is a minor, not a patch (`VERSIONING.md` §2),
+  and the README/SPEC Portable Core text no longer lists relative imports as rejected.
+

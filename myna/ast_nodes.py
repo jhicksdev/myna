@@ -303,6 +303,7 @@ class ImportAlias:
 @dataclass
 class ImportStmt(Stmt):
     names: list[ImportAlias] = field(default_factory=list)
+    level: int = 0  # relative-import level for `<.pkg` / `<..pkg`
 
 
 @dataclass

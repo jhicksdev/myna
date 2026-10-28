@@ -209,7 +209,7 @@ Until then, the honest label is `0.y.z`.
 
 ---
 
-## Adoption status (0.4.x)
+## Adoption status (0.4.x – 0.5.x)
 
 - This policy is adopted as of 0.4.0 (2026-10-26).
 - 0.4.1 single-sources the version in `myna/__init__.py`; `pyproject.toml` reads it
@@ -217,3 +217,7 @@ Until then, the honest label is `0.y.z`.
 - 0.4.1 adds `myna --version`, reporting the package and language versions (§1).
 - 0.4.1 adds a pull-request CI matrix (Python 3.11–3.13 × Node 20/22/24) and runs the
   suite on every push and pull request.
+- 0.5.0 adds multi-file relative imports for the JavaScript target (D-005), a new
+  functional flag (`--module-root`), and a changed string-escape contract; it is a minor
+  by §2. The `@target` default flip (D-003) is deferred to 0.6.0 and is deprecated as of
+  0.5.0.

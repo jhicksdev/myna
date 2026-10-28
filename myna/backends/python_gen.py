@@ -165,6 +165,8 @@ class PythonGenerator:
 
         if isinstance(stmt, ast.ImportStmt):
             parts = [f"{a.name} as {a.asname}" if a.asname else a.name for a in stmt.names]
+            if stmt.level:
+                return [f"{self.ind()}from {'.' * stmt.level} import {', '.join(parts)}"]
             return [f"{self.ind()}import {', '.join(parts)}"]
 
         if isinstance(stmt, ast.ImportFromStmt):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -24,7 +25,9 @@ from myna import (
 )
 import myna.ast_nodes as ast
 from myna.bundler import BundleError, bundle, bundle_zipapp
+from myna.js_modules import collect_js_modules, write_js_tree
 from myna.loader import compile_myna_source, install
+from myna.modules import ModuleError
 from myna.targets import expand_target_blocks
 
 
@@ -66,7 +69,14 @@ def cmd_compile(args: argparse.Namespace) -> int:
     target = args.target
     if target is None and args.output and str(args.output).endswith((".js", ".mjs")):
         target = "js"
-    code = myna_to_js(src) if target == "js" else myna_to_python(src)
+    if target == "js":
+        # Relative imports become specifiers for sibling output files, so the emitted
+        # extension follows the output file (Node treats `.mjs` as an ES module).
+        module_ext = ".mjs" if args.output and str(args.output).endswith(".mjs") else ".js"
+        source_path = None if args.input == "-" else args.input
+        code = myna_to_js(src, source_path=source_path, module_ext=module_ext)
+    else:
+        code = myna_to_python(src)
     if args.output:
         Path(args.output).write_text(code, encoding="utf-8")
     else:
@@ -84,9 +94,55 @@ def cmd_decompile(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_python_entry(src_path: Path, src: str, script_args: list[str]) -> int:
+def _module_root(args: argparse.Namespace) -> Path | None:
+    """Resolve `--module-root` / `MYNA_MODULE_ROOT`, or None for the entry's directory."""
+    raw = getattr(args, "module_root", None) or os.environ.get("MYNA_MODULE_ROOT")
+    if not raw:
+        return None
+    root = Path(raw).expanduser()
+    if not root.is_dir():
+        raise ModuleError(f"module root is not a directory: {root}")
+    return root.resolve()
+
+
+def _relative_missing_message(
+    package: str, exc: ImportError, root: Path
+) -> str | None:
+    """Turn a missing synthetic-package module into an actionable message."""
+    name = exc.name or ""
+    prefix = package + "."
+    cannot_import = re.search(r"cannot import name '([^']+)' from", str(exc))
+    if name.startswith(prefix) and cannot_import:
+        # The module exists; one of its names does not (`from .util import missing`).
+        relative = name[len(prefix) :]
+        return (
+            f"relative module '{relative}' has no name '{cannot_import.group(1)}' "
+            f"(resolved under module root '{root}')"
+        )
+    if name.startswith(prefix):
+        relative = name[len(prefix) :]
+    elif name == package and cannot_import:
+        # `from . import util`: the synthetic root package has no such submodule.
+        relative = cannot_import.group(1)
+    else:
+        return None
+    looked = root.joinpath(*relative.split("."))
+    return (
+        f"cannot resolve relative import: no module '{relative}' under module root "
+        f"'{root}' (looked for {looked}.myna or {looked}/__init__.myna; pass "
+        f"--module-root DIR or set MYNA_MODULE_ROOT)"
+    )
+
+
+def _run_python_entry(
+    src_path: Path,
+    src: str,
+    script_args: list[str],
+    module_root: Path | None = None,
+) -> int:
     """Execute a Myna entry file with sibling `.myna` modules importable."""
-    root = src_path.resolve().parent
+    entry = src_path.resolve()
+    root = module_root or entry.parent
     package = f"_myna_run_{uuid.uuid4().hex[:8]}"
     package_module = types.ModuleType(package)
     package_module.__path__ = [str(root)]
@@ -96,14 +152,20 @@ def _run_python_entry(src_path: Path, src: str, script_args: list[str]) -> int:
 
     finder = install(package, root)
     try:
-        py_code = compile_myna_source(src, src_path.resolve())
+        py_code = compile_myna_source(src, entry)
         globs = {
             "__name__": "__main__",
-            "__file__": str(src_path.resolve()),
+            "__file__": str(entry),
             "__package__": package,
         }
         sys.argv = [str(src_path)] + list(script_args)
-        exec(compile(py_code, str(src_path), "exec"), globs)
+        try:
+            exec(compile(py_code, str(src_path), "exec"), globs)
+        except ImportError as exc:
+            message = _relative_missing_message(package, exc, root)
+            if message is None:
+                raise
+            raise ModuleError(message) from exc
     finally:
         sys.meta_path.remove(finder)
         for name in [n for n in sys.modules if n == package or n.startswith(package + ".")]:
@@ -113,24 +175,29 @@ def _run_python_entry(src_path: Path, src: str, script_args: list[str]) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     src_path = Path(args.input)
-    src = src_path.read_text(encoding="utf-8")
+    module_root = _module_root(args)
     if args.target == "js":
-        js_code = myna_to_js(src)
-        with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False, encoding="utf-8") as tmp:
-            tmp.write(js_code)
-            tmp_path = tmp.name
-        try:
-            proc = subprocess.run(["node", tmp_path, *args.script_args], check=False)
+        entry = src_path.resolve()
+        with tempfile.TemporaryDirectory(prefix="myna-js-") as tmp:
+            modules = collect_js_modules(
+                entry, module_root=module_root, module_ext=".mjs"
+            )
+            entry_output = write_js_tree(
+                modules, output_root=Path(tmp), module_ext=".mjs"
+            )
+            proc = subprocess.run(
+                ["node", str(entry_output), *args.script_args], check=False
+            )
             return proc.returncode
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
 
-    return _run_python_entry(src_path, src, list(args.script_args))
+    src = src_path.read_text(encoding="utf-8")
+    return _run_python_entry(src_path, src, list(args.script_args), module_root)
 
 
 def cmd_bundle(args: argparse.Namespace) -> int:
+    module_root = _module_root(args)
     if args.zipapp:
-        result = bundle_zipapp(Path(args.input))
+        result = bundle_zipapp(Path(args.input), module_root)
         output = Path(args.output) if args.output else Path(args.input).with_suffix(".pyz")
         output.write_bytes(result.data)
         try:
@@ -143,7 +210,7 @@ def cmd_bundle(args: argparse.Namespace) -> int:
         )
         return 0
 
-    result = bundle(Path(args.input))
+    result = bundle(Path(args.input), module_root)
     if args.output:
         Path(args.output).write_text(result.code, encoding="utf-8")
         print(f"myna: bundled {len(result.modules)} module(s) -> {args.output}", file=sys.stderr)
@@ -194,6 +261,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 def cmd_targets(args: argparse.Namespace) -> int:
     src = Path(args.input).read_text(encoding="utf-8") if args.input != "-" else sys.stdin.read()
+    source_path = None if args.input == "-" else args.input
     mod = parse(src)
     declared = ", ".join(sorted(mod.targets)) if mod.targets else "(none)"
     print(f"=== Target Report ({args.input}) ===")
@@ -201,7 +269,10 @@ def cmd_targets(args: argparse.Namespace) -> int:
 
     for target, compile_fn in (("py", myna_to_python), ("js", myna_to_js)):
         try:
-            compile_fn(src)
+            if target == "js":
+                compile_fn(src, source_path=source_path)
+            else:
+                compile_fn(src)
         except TargetError as exc:
             print(f"{target:<9}: unsupported — {exc}")
             continue
@@ -254,11 +325,23 @@ def main(argv: list[str] | None = None) -> int:
     p_bundle.add_argument("input", help="Entry .myna file")
     p_bundle.add_argument("-o", "--output", help="Output path (default: stdout, or <input>.pyz with --zipapp)")
     p_bundle.add_argument("--zipapp", action="store_true", help="Write a runnable .pyz zipapp instead of a single .py script")
+    p_bundle.add_argument(
+        "--module-root",
+        metavar="DIR",
+        help="Root that the entry's relative imports resolve from (default: the entry file's "
+        "directory, or $MYNA_MODULE_ROOT)",
+    )
     p_bundle.set_defaults(func=cmd_bundle)
 
     p_run = sub.add_parser("run", aliases=["r"], help="Compile and execute a .myna file directly (via Python or Node.js)")
     p_run.add_argument("input", help="Input .myna file to run")
     p_run.add_argument("-t", "--target", choices=["py", "js"], default="py", help="Runtime target: 'py' (default) or 'js' (Node.js)")
+    p_run.add_argument(
+        "--module-root",
+        metavar="DIR",
+        help="Root that relative imports resolve from (default: the entry file's directory, "
+        "or $MYNA_MODULE_ROOT)",
+    )
     p_run.add_argument("script_args", nargs=argparse.REMAINDER, help="Arguments passed to the script")
     p_run.set_defaults(func=cmd_run)
 
@@ -275,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (LexError, ParseError, DecompileError, TargetError, BundleError, OSError) as exc:
+    except (LexError, ParseError, DecompileError, TargetError, BundleError, ModuleError, OSError) as exc:
         print(f"myna: {exc}", file=sys.stderr)
         return 1
 

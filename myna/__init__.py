@@ -7,7 +7,7 @@ from myna.backends.js_gen import compile_to_js
 from myna.frontends.python_decompile import DecompileError, decompile_python
 from myna.targets import TargetError
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 # The language version is the package major.minor; derive it so the two cannot drift.
 LANGUAGE_VERSION = ".".join(__version__.split(".")[:2])
 
@@ -18,10 +18,26 @@ def myna_to_python(source: str) -> str:
     return compile_to_python(ast_mod)
 
 
-def myna_to_js(source: str) -> str:
-    """Compile Myna source code to JavaScript (ES2024+) source code."""
+def myna_to_js(
+    source: str,
+    *,
+    source_path: str | None = None,
+    module_ext: str = ".js",
+    import_base: str | None = None,
+) -> str:
+    """Compile Myna source code to JavaScript (ES2024+) source code.
+
+    ``source_path`` is the file the source came from; relative imports are resolved
+    from it and emitted as relative ES module specifiers ending in ``module_ext``.
+    Without it, relative imports raise :class:`TargetError`.
+    """
     ast_mod = parse(source)
-    return compile_to_js(ast_mod)
+    return compile_to_js(
+        ast_mod,
+        source_path=source_path,
+        module_ext=module_ext,
+        import_base=import_base,
+    )
 
 
 def python_to_myna(source: str, compact: bool = True, minify_locals: bool = False) -> str:

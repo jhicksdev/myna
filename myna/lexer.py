@@ -1,8 +1,10 @@
 """Lexer for the Myna programming language."""
 
 from __future__ import annotations
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Mapping, Optional
 
 
 class TT(Enum):
@@ -448,6 +450,98 @@ def tokenize(source: str) -> list[Token]:
     return tokens
 
 
+_SIMPLE_ESCAPES: dict[str, str] = {
+    "a": "\a",
+    "b": "\b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+}
+
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
+
+def decode_escape(
+    source: str,
+    i: int,
+    line: int = 1,
+    col: int = 1,
+    *,
+    bytes_mode: bool = False,
+    extra: Optional[Mapping[str, str]] = None,
+    context: str = "string literal",
+) -> tuple[str, int]:
+    """Decode the escape sequence starting at ``source[i]`` (a backslash).
+
+    Returns ``(text, consumed)`` where ``consumed`` includes the backslash. The
+    escape set follows Python's string literals: ``\\a \\b \\f \\n \\r \\t \\v
+    \\\\ \\' \\"``, octal ``\\ooo``, hex ``\\xNN``, ``\\uNNNN``, ``\\UNNNNNNNN``,
+    and ``\\N{NAME}``. Unknown or malformed escapes raise :class:`LexError`
+    instead of silently keeping the backslash.
+    """
+    esc = source[i + 1]
+    if extra and esc in extra:
+        return extra[esc], 2
+    if esc in _SIMPLE_ESCAPES:
+        return _SIMPLE_ESCAPES[esc], 2
+
+    if bytes_mode and esc in ("u", "U", "N"):
+        raise LexError(
+            f"Invalid escape sequence '\\{esc}' in byte literal "
+            f"(only \\xNN and octal escapes produce raw byte values)",
+            line,
+            col,
+        )
+
+    if esc in "01234567":
+        end = i + 2
+        while end < len(source) and end < i + 4 and source[end] in "01234567":
+            end += 1
+        value = int(source[i + 1 : end], 8)
+        if bytes_mode and value > 0xFF:
+            raise LexError("Octal escape in byte literal exceeds 255", line, col)
+        return chr(value), end - i
+
+    if esc in ("x", "X"):
+        digits = source[i + 2 : i + 4]
+        if len(digits) != 2 or any(c not in _HEX_DIGITS for c in digits):
+            raise LexError("Invalid \\x escape (expected two hex digits)", line, col)
+        return chr(int(digits, 16)), 4
+
+    if esc in ("u", "U"):
+        width = 4 if esc == "u" else 8
+        digits = source[i + 2 : i + 2 + width]
+        if len(digits) != width or any(c not in _HEX_DIGITS for c in digits):
+            raise LexError(
+                f"Invalid \\{esc} escape (expected {width} hex digits)", line, col
+            )
+        value = int(digits, 16)
+        if value > 0x10FFFF:
+            raise LexError(f"\\{esc} escape is outside the Unicode range", line, col)
+        return chr(value), 2 + width
+
+    if esc == "N":
+        if i + 2 >= len(source) or source[i + 2] != "{":
+            raise LexError("Invalid \\N escape (expected \\N{NAME})", line, col)
+        end = source.find("}", i + 3)
+        if end == -1:
+            raise LexError("Unterminated \\N{NAME} escape", line, col)
+        name = source[i + 3 : end]
+        try:
+            return unicodedata.lookup(name), end - i + 1
+        except KeyError:
+            raise LexError(f"Unknown Unicode character name {name!r}", line, col) from None
+
+    kind = "byte literal" if bytes_mode else context
+    hint = "" if bytes_mode else '; use a raw string (_"...") to keep the backslash'
+    raise LexError(f"Invalid escape sequence '\\{esc}' in {kind}{hint}", line, col)
+
+
 def _read_string(
     source: str,
     i: int,
@@ -478,37 +572,18 @@ def _read_string(
                 buf.append(source[i : i + 2])
                 i += 2
                 col += 2
-            elif bytes_mode and source[i + 1] in ("x", "X"):
-                hex_digits = source[i + 2 : i + 4]
-                if len(hex_digits) != 2 or any(c not in "0123456789abcdefABCDEF" for c in hex_digits):
-                    raise LexError("Invalid \\x escape in byte literal", line, col)
-                buf.append(chr(int(hex_digits, 16)))
-                i += 4
-                col += 4
-            elif bytes_mode and source[i + 1] in "01234567":
-                end = i + 2
-                while end < n and end < i + 4 and source[end] in "01234567":
-                    end += 1
-                octal = source[i + 1 : end]
-                value = int(octal, 8)
-                if value > 0xFF:
-                    raise LexError("Octal escape in byte literal exceeds 255", line, col)
-                buf.append(chr(value))
-                col += end - i
-                i = end
-            else:
-                esc = source[i + 1]
-                esc_map = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", "'": "'", '"': '"', "0": "\0"}
-                mapped = esc_map.get(esc)
-                if mapped is not None:
-                    buf.append(mapped)
-                else:
-                    literal = "\\" + esc
-                    # Bytes keep the historical UTF-8 encoding for literal
-                    # characters; `\xNN`/octal escapes are raw byte values.
-                    buf.append(literal.encode("utf-8").decode("latin-1") if bytes_mode else literal)
+            elif source[i + 1] == "\n":
+                # A backslash-newline inside a string is a line continuation.
                 i += 2
-                col += 2
+                line += 1
+                col = 1
+            else:
+                text, consumed = decode_escape(
+                    source, i, line, col, bytes_mode=bytes_mode
+                )
+                buf.append(text)
+                i += consumed
+                col += consumed
         else:
             if ch == "\n":
                 line += 1

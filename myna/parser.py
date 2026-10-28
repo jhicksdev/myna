@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Optional, Union
 
-from myna.lexer import TT, Token, tokenize
+from myna.lexer import TT, LexError, Token, decode_escape, tokenize
 from myna.targets import VALID_TARGETS
 import myna.ast_nodes as ast
 
@@ -754,7 +754,7 @@ class Parser:
             m = self._parse_dotted_name()
             a = self.expect(TT.IDENT, "module alias").value if self.match(TT.GT) else None
             aliases.append(ast.ImportAlias(name=m, asname=a))
-        return ast.ImportStmt(names=aliases, line=tok.line, col=tok.col)
+        return ast.ImportStmt(names=aliases, level=level, line=tok.line, col=tok.col)
 
     def _parse_dotted_name(self) -> str:
         parts = [self.expect(TT.IDENT, "identifier").value]
@@ -1635,10 +1635,12 @@ class Parser:
                 sub_expr = parse_expr_str(expr_src, line=expr_line, col=expr_col)
                 parts.append((sub_expr, fmt_spec))
             elif raw[i] == "\\" and i + 1 < n:
-                esc = raw[i + 1]
-                esc_map = {"`": "`", "\\": "\\", "n": "\n", "t": "\t", "r": "\r"}
-                lit_buf.append(esc_map.get(esc, "\\" + esc))
-                i += 2
+                esc_line, esc_col = self._fstring_position(raw, i, tok)
+                text, consumed = decode_escape(
+                    raw, i, esc_line, esc_col, extra={"`": "`"}, context="template string"
+                )
+                lit_buf.append(text)
+                i += consumed
             else:
                 lit_buf.append(raw[i])
                 i += 1

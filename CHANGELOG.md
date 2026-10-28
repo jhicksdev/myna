@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+## 0.5.0 (2026-10-28)
+
+### Added
+
+- `myna run` and `myna bundle` accept `--module-root DIR` (or `MYNA_MODULE_ROOT`), which
+  resolves the entry file's relative imports from `DIR`. A `tests/` entry can now reach a
+  sibling `src/` tree without a committed symlink.
+- JavaScript: relative imports compile to multi-file ES modules
+  (`<.util:{f}` → `import { f } from "./util.js"`), every top-level binding is exported,
+  and `myna run -t js` compiles the reachable graph to `.mjs` files before running Node.
+  Single-file JS bundling is still out of scope. See `DECISIONS.md` D-005.
+- `<.util` (a relative import without a name list) now binds the imported module object
+  instead of silently becoming the absolute `import util`.
+
+### Changed
+
+- String literals now decode Python's full escape set (`\a \b \f \v \xNN \uNNNN
+  \UNNNNNNNN \ooo \N{NAME}` and a backslash-newline continuation), closing `GAPS.md` G1.
+  Unknown or malformed escapes are a `LexError` instead of being silently kept; use a raw
+  string (`_"..."`) to keep a backslash.
+- JavaScript `p` of a string inside a list/dict/set now escapes control characters the way
+  Python's `repr` does, so escaped values print identically on both targets.
+
+### Deprecated
+
+- Implicit `@target(py, js)` for modules with no declaration. From **0.6.0** a module
+  defaults to `@target(py)`; add `@target(py, js)` to any module that must compile for
+  JavaScript. This is `DECISIONS.md` D-003, deferred from 0.5.0 and announced here per
+  `VERSIONING.md` §2. Migration: one declaration per portable module, no syntax change.
+
+### Fixed
+
+- JavaScript `@main` is guarded by `import.meta.filename === process.argv[1]` instead of
+  running whenever the module is loaded, so a multi-file program only runs its entry
+  file's `@main` block (matching Python's `__name__ == "__main__"`).
+- JavaScript string literals are emitted as valid ES string literals for every code point
+  (`repr` could emit `\UXXXXXXXX`/`\N{...}`).
+- A relative import that cannot be resolved under the module root now reports an
+  actionable error (with the module root and the expected path) instead of a
+  `ModuleNotFoundError` traceback mentioning the synthetic package name.
+- JavaScript star imports (`<math:{*}`) are rejected with `TargetError` instead of
+  emitting invalid JavaScript.
+
+### Documentation
+
+- `SPEC.md`, `README.md`, and `skills/myna/SKILL.md` document the string escape set,
+  `--module-root`, and the JavaScript multi-file import rules.
+
 ## 0.4.2 (2026-10-27)
 
 ### Fixed

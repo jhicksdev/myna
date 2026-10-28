@@ -1,4 +1,4 @@
-# Myna Language Specification (v0.4)
+# Myna Language Specification (v0.5)
 
 **Myna** is an ultra-dense, symbol-based, AI-native programming language designed to minimize LLM token consumption while mapping 1-to-1 onto the semantics of **Python 3.12+** (normative) and a portable subset of **JavaScript (ES2024+)**.
 
@@ -27,10 +27,16 @@ D-002 for the target contract and the JavaScript portable-core scope.
 | `_` | `pass` / `_` | `/*noop*/` / `_` | No-op statement when standalone in block, or wildcard identifier |
 | `42`, `3.14`, `0xff` | `42`, `3.14`, `0xff` | `42`, `3.14`, `0xff` | Numeric literals |
 | `"str"`, `'str'` | `"str"`, `'str'` | `"str"`, `'str'` | String literals |
-| `` `hi {x}` `` | `f"hi {x}"` | `` `hi ${x}` `` | Interpolated string (supports format spec `{x:.2f}`; escapes `` \` ``, `\\`, `\n`, `\t`, `\r`) |
+| `` `hi {x}` `` | `f"hi {x}"` | `` `hi ${x}` `` | Interpolated string (supports format spec `{x:.2f}`; escapes: every escape below plus `` \` ``) |
 | `_"raw"` | `r"raw"` | `String.raw\`raw\`` | Raw string literal |
 | `0b"bytes"` | `b"bytes"` | `new Uint8Array([...])` | Byte literal (literal text is UTF-8; `\xNN`/octal escapes produce raw byte values) |
 | `# comment` | `# comment` | `// comment` | Single-line comment (`#` followed by space, `#`, or newline; note `//` is floor division) |
+
+Strings decode Python's escape set: `\a \b \f \n \r \t \v \\ \' \"`, octal `\ooo`,
+`\xNN`, `\uNNNN`, `\UNNNNNNNN`, `\N{NAME}`, and a backslash-newline line continuation.
+An unknown or malformed escape is a lexer error instead of a silently kept backslash; use
+a raw string (`_"..."`) to keep the backslash. Byte literals accept `\xNN` and octal
+escapes as raw byte values, and reject `\u`, `\U`, and `\N`.
 
 ### Built-in Type Shorthands (in Type Annotations)
 | Myna | Python | TypeScript / JS |
@@ -71,11 +77,19 @@ D-002 for the target contract and the JavaScript portable-core scope.
 
 `@target(...)` with no block must be the first non-docstring statement and declares which targets the file supports; compiling for another target raises `TargetError`. With a block it selects the statements/imports emitted for that target. Target blocks are module-level only.
 
-In language 0.4 a module with no declaration is treated as `@target(py, js)`. Language
-0.5.0 changes that default to `@target(py)`; portability then requires an explicit
-`@target(py, js)` (`DECISIONS.md` D-003).
+In language 0.5 a module with no declaration is treated as `@target(py, js)`, as in 0.4.
+Language 0.6.0 changes that default to `@target(py)`; portability then requires an explicit
+`@target(py, js)`. The implicit default is deprecated as of 0.5.0 (`DECISIONS.md` D-003).
 
-Relative imports resolve against the entry file's directory when run with `myna run`: `<.util:{f}` loads `util.myna` beside the entry file, and `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package). Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
+Relative imports resolve against the importing module's directory: `<.util:{f}` loads `util.myna` beside the importing module, `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package), and `<.util` without a name list binds the imported module object. A program's entry file instead resolves against its own directory when run with `myna run`, or against `--module-root DIR` / `MYNA_MODULE_ROOT` when set, which lets an entry in `tests/` reach a sibling `src/`. Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
+
+For the JavaScript target a relative import becomes a relative ES module specifier
+(`<.util:{slug}` → `import { slug } from "./util.js"`, with the extension following
+`-o`'s suffix), and every top-level binding is exported so another module can import it
+the way Python allows. `myna run -t js` compiles the reachable graph into `.mjs` files in
+a temporary directory and runs it with Node. `myna_to_js(source)` has no filesystem
+context, so it requires `source_path=` (or a `myna compile` of the file) when relative
+imports are present.
 
 ---
 

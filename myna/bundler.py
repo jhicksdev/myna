@@ -110,9 +110,11 @@ def _resolve_import(
     return base, extras
 
 
-def _collect(entry: Path) -> tuple[Path, str, list[BundleModule], set[str]]:
+def _collect(
+    entry: Path, module_root: Path | None = None
+) -> tuple[Path, str, list[BundleModule], set[str]]:
     entry = entry.resolve()
-    root = entry.parent
+    root = Path(module_root).resolve() if module_root is not None else entry.parent
     modules: dict[str, BundleModule] = {}
     namespaces: set[str] = set()
     pending: list[tuple[Path, str, bool]] = [(entry, "", False)]
@@ -180,15 +182,15 @@ def _collect(entry: Path) -> tuple[Path, str, list[BundleModule], set[str]]:
     return entry, entry_code, ordered, namespaces
 
 
-def bundle(entry: Path) -> Bundle:
+def bundle(entry: Path, module_root: Path | None = None) -> Bundle:
     """Compile `entry` and its relative `.myna` imports into one standalone script."""
-    entry, entry_code, modules, namespaces = _collect(entry)
+    entry, entry_code, modules, namespaces = _collect(entry, module_root)
     return Bundle(_render_script(entry, entry_code, modules, namespaces), modules, namespaces)
 
 
-def bundle_zipapp(entry: Path) -> Zipapp:
+def bundle_zipapp(entry: Path, module_root: Path | None = None) -> Zipapp:
     """Compile `entry` and its relative imports into a runnable `.pyz` archive."""
-    _entry, entry_code, modules, namespaces = _collect(entry)
+    _entry, entry_code, modules, namespaces = _collect(entry, module_root)
     return Zipapp(_render_zipapp(entry_code, modules, namespaces), modules, namespaces)
 
 

@@ -489,6 +489,169 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertEqual(py_out, js_out)
         self.assertEqual(js_out, "3\n2\n1\n0\n2\n4\n0\n1\n2")
 
+    def test_cross_target_string_escapes(self):
+        src = r'''
+        s = "a\fb\vc\a\b\x41\u00e9\101"
+        t = `a\fb\vc{{x}}`
+        @main {
+            p(#s)
+            p([ch | ch <- s])
+            p(t)
+        }
+        '''
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertIn("'\\x0c'", js_out)
+        self.assertIn("'\\x0b'", js_out)
+
+    def test_js_relative_imports_compile_to_es_modules(self):
+        src = r'''
+        @target(py, js)
+        @slug(text:s)->s => text.lower().replace(" ", "-")
+        LIMIT = 3
+        '''
+        helper = r'''
+        @target(py, js)
+        <..util:{slug}
+        @label(text:s)->s => `[{slug(text)}]`
+        '''
+        entry = r'''
+        @target(py, js)
+        <.util:{slug, LIMIT}
+        <.pkg.helper:{label}
+        <.pkg:{name, Thing}
+        <.util
+        @main {
+            p(slug("Hello World"))
+            p(label("Deep Import"))
+            p(name())
+            p(LIMIT)
+            p(util.slug("MODULE"))
+            p(Thing(21).double())
+        }
+        '''
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "pkg").mkdir()
+            (root / "src" / "util.myna").write_text(src, encoding="utf-8")
+            (root / "src" / "pkg" / "__init__.myna").write_text(
+                "@target(py, js)\n"
+                '@name->s => "pkg"\n'
+                "<.:{name}\n"
+                "$Thing {\n"
+                "  @init(v:i) { .v = v }\n"
+                "  @double->i => .v * 2\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            (root / "src" / "pkg" / "helper.myna").write_text(helper, encoding="utf-8")
+            (root / "src" / "main.myna").write_text(entry, encoding="utf-8")
+
+            py_run = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(root / "src" / "main.myna")],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            for path in sorted(root.rglob("*.myna")):
+                out = (root / "js" / path.relative_to(root)).with_suffix(".mjs")
+                out.parent.mkdir(parents=True, exist_ok=True)
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "myna",
+                        "compile",
+                        str(path),
+                        "-t",
+                        "js",
+                        "-o",
+                        str(out),
+                    ],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(proc.returncode, 0, f"{path}: {proc.stderr}")
+            node_run = subprocess.run(
+                ["node", str(root / "js" / "src" / "main.mjs")],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(py_run.returncode, 0, py_run.stderr)
+        self.assertEqual(node_run.returncode, 0, node_run.stderr)
+        self.assertEqual(node_run.stdout, py_run.stdout)
+        self.assertEqual(
+            py_run.stdout.splitlines(),
+            ["hello-world", "[deep-import]", "pkg", "3", "module", "42"],
+        )
+
+    def test_run_js_resolves_relative_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "tests").mkdir()
+            (root / "src" / "util.myna").write_text(
+                "@target(py, js)\n"
+                '@slug(s:s)->s => s.lower()\n'
+                '@main { p("util-main") }\n',
+                encoding="utf-8",
+            )
+            (root / "src" / "highlight.myna").write_text(
+                "@target(py, js)\n<.util:{slug}\n"
+                "@highlight(s:s)->s => `<{slug(s)}>`\n",
+                encoding="utf-8",
+            )
+            entry = root / "tests" / "run.myna"
+            entry.write_text(
+                "@target(py, js)\n<.src.highlight:{highlight}\n"
+                '@main { p(highlight("ABC")) }\n',
+                encoding="utf-8",
+            )
+            with_root = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "myna",
+                    "run",
+                    "-t",
+                    "js",
+                    "--module-root",
+                    str(root),
+                    str(entry),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            py_out = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "myna",
+                    "run",
+                    "--module-root",
+                    str(root),
+                    str(entry),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            without_root = subprocess.run(
+                [sys.executable, "-m", "myna", "run", "-t", "js", str(entry)],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(with_root.returncode, 0, with_root.stderr)
+        self.assertEqual(with_root.stdout, py_out.stdout)
+        self.assertEqual(with_root.stdout.strip(), "<abc>")
+        self.assertEqual(without_root.returncode, 1)
+        self.assertIn("cannot resolve relative import", without_root.stderr)
+
     def test_examples_generate_valid_javascript(self):
         for path in sorted((REPO_ROOT / "examples").glob("*.myna")):
             src = path.read_text(encoding="utf-8")

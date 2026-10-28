@@ -14,6 +14,7 @@ python3 -m myna compile input.myna -t js          # Compile Myna -> JavaScript (
 python3 -m myna decompile input.py -o output.myna # Compress Python -> Myna (-m for ultra-compact)
 python3 -m myna run script.myna                   # Execute .myna via Python
 python3 -m myna run -t js script.myna             # Execute .myna via Node.js
+python3 -m myna run --module-root . tests/run.myna  # Resolve entry relative imports from the project root
 python3 -m myna bundle script.myna -o app.py      # Bundle relative imports into one standalone Python file
 python3 -m myna bundle script.myna --zipapp -o app.pyz  # ...or a runnable, reproducible .pyz archive
 python3 -m myna targets script.myna               # Report declared/inferred target support
@@ -21,16 +22,17 @@ python3 -m myna stats file.py --show              # Measure token & character sa
 python3 -m myna --version                         # Package + language version
 ```
 
-The JavaScript target is bounded and single-file: Python semantics are emulated with
-inline helpers, while relative imports, multiple inheritance, class/method decorators,
-and builtins without a faithful JS equivalent raise `TargetError` instead of producing
-wrong output.
+The JavaScript target is bounded: Python semantics are emulated with inline helpers, while
+multiple inheritance, class/method decorators, star imports, and builtins without a
+faithful JS equivalent raise `TargetError` instead of producing wrong output. Relative
+imports become relative ES module specifiers, every top-level binding is exported, and
+`myna run -t js` compiles the whole reachable graph to `.mjs` files before running Node.
 
 ## 2. Complete Symbol Rosetta Stone
 
 ### Literals, Types & Constants
 - `T` = `True`, `F` = `False`, `N` = `None`, `_` (standalone in `{_}`) = `pass`
-- `` `hi {x:.2f}` `` = `f"hi {x:.2f}"` (escapes: `` \` ``, `\\`, `\n`, `\t`, `\r`), `_"raw"` = `r"raw"`, `0b"bytes"` = `b"bytes"` (literal text is UTF-8; `\xNN`/octal escapes are raw bytes)
+- `` `hi {x:.2f}` `` = `f"hi {x:.2f}"` (escapes: `` \` ``, `\\`, `\n`, `\t`, `\r`, `\a`, `\b`, `\f`, `\v`, `\xNN`, `\uNNNN`, `\ooo`; unknown escapes are errors), `_"raw"` = `r"raw"`, `0b"bytes"` = `b"bytes"` (literal text is UTF-8; `\xNN`/octal escapes are raw bytes)
 - **Types:** `i`=`int`, `f`=`float`, `s`=`str`, `b`=`bool`, `B`=`bytes`, `A`=`Any`, `N`=`None`
 - **Compound Types:** `T?`=`T | None`, `[T]`=`list[T]`, `{K:V}`=`dict[K, V]`, `{T}`=`set[T]`, `(T1,T2)`=`tuple[T1, T2]`
 
@@ -38,7 +40,7 @@ wrong output.
 - `<os, sys` → `import os, sys`
 - `<numpy>np` → `import numpy as np`
 - `<pathlib:{Path, PurePath>PP}` → `from pathlib import Path, PurePath as PP`
-- `<.utils:{helper}` → `from .utils import helper`; under `myna run`, `.utils` resolves to `utils.myna` beside the entry file, and `.pkg.mod` to `pkg/mod.myna` (directories need no `__init__.myna`).
+- `<.utils:{helper}` → `from .utils import helper`; relative imports resolve from the importing module's directory (`.pkg.mod` → `pkg/mod.myna`, directories need no `__init__.myna`). For `myna run`, the entry file's imports resolve from its own directory or from `--module-root DIR` / `MYNA_MODULE_ROOT`; `<.util` (no list) binds the module object. For `-t js` they become `./utils.js` specifiers.
 - `@=x, y` → `global x, y` | `^=x, y` → `nonlocal x, y` | `~x[k]` → `del x[k]`
 - `$=Alias = [i]` → `type Alias = list[int]`
 - `@target(py)` → module is Python-only; `@target(py, js)` is portable (default: both). Must precede all code.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import os
 import pathlib
 import subprocess
 import sys
@@ -10,7 +11,15 @@ import unittest
 import zipfile
 
 import myna
-from myna import DecompileError, ParseError, TargetError, myna_to_js, myna_to_python, python_to_myna
+from myna import (
+    DecompileError,
+    LexError,
+    ParseError,
+    TargetError,
+    myna_to_js,
+    myna_to_python,
+    python_to_myna,
+)
 
 
 class TestMynaTranspiler(unittest.TestCase):
@@ -461,6 +470,39 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["raw"], b"a\x80\xff")
         self.assertEqual(ns["text"], "é".encode("utf-8"))
 
+    def test_string_escapes_decode_like_python(self):
+        src = r'''
+        s = "a\fb\vc\a\b\x41\u00e9\101\N{BULLET}"
+        t = `a\fb\vc{{x}}`
+        r = _"a\fb"
+        by = 0b"a\f\101\x42"
+        '''
+        ns = self.exec_myna(src)
+        self.assertEqual(ns["s"], "a\fb\vc\a\b\x41\u00e9\101\N{BULLET}")
+        self.assertEqual(ns["t"], "a\fb\vc{x}")
+        self.assertEqual(ns["r"], "a\\fb")
+        self.assertEqual(ns["by"], b"a\fAB")
+
+    def test_invalid_string_escapes_are_errors(self):
+        cases = [
+            's = "\\q"\n',
+            's = "\\x4"\n',
+            's = "\\u123"\n',
+            's = "\\N{NOT A CHARACTER}"\n',
+            's = 0b"\\u0041"\n',
+            "s = `\\q`\n",
+        ]
+        for src in cases:
+            with self.subTest(src=src):
+                with self.assertRaises(LexError):
+                    myna_to_python(src)
+
+    def test_decompile_preserves_control_characters(self):
+        py_src = 's = "a\\x0cb\\x0bc\\x07"\n'
+        ns: dict = {}
+        exec(myna_to_python(python_to_myna(py_src)), ns)
+        self.assertEqual(ns["s"], "a\fb\vc\a")
+
     def test_cli_version(self):
         proc = subprocess.run(
             [sys.executable, "-m", "myna", "--version"],
@@ -475,15 +517,20 @@ class TestMynaTranspiler(unittest.TestCase):
     def test_js_rejects_unemulable_constructs(self):
         cases = {
             "multiple inheritance": "$A{_}\n$B{_}\n$C < A, B {_}\n",
-            "relative import": "<.util:{f}\n",
             "unsupported builtin": '@main { p(@open("x")) }\n',
             "method decorator": "$C { #[dec]\n @f { ^1 } }\n",
             "class decorator": "#[dec]\n$C { _ }\n",
+            "star import": '<math:{*}\n',
         }
         for label, src in cases.items():
             with self.subTest(construct=label):
                 with self.assertRaises(TargetError):
                     myna_to_js(src)
+
+    def test_js_relative_imports_require_a_source_path(self):
+        with self.assertRaises(TargetError) as caught:
+            myna_to_js("<.util:{f}\n")
+        self.assertIn("source path", str(caught.exception))
 
     def test_try_requires_handler_or_finally(self):
         for src in ("!{ _ } !? { _ }\n", "!{ _ }\n"):
@@ -570,6 +617,121 @@ class TestMynaTranspiler(unittest.TestCase):
             )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.splitlines(), ["hello-world", "pkg", "deep-import", "plain"])
+
+    def test_run_relative_module_import_binds_module_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "util.myna").write_text(
+                '@target(py)\n@bang(text:s)->s => text + "!"\n', encoding="utf-8"
+            )
+            (root / "main.myna").write_text(
+                "@target(py)\n<.util\n@main { p(util.bang(\"hey\")) }\n",
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(root / "main.myna")],
+                cwd=pathlib.Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "hey!")
+
+    def _write_src_tests_layout(self, root: pathlib.Path) -> None:
+        src = root / "src"
+        tests = root / "tests"
+        src.mkdir()
+        tests.mkdir()
+        (src / "highlight.myna").write_text(
+            "@target(py)\n@highlight_code(s:s)->s => `<{s}>`\n", encoding="utf-8"
+        )
+        (src / "util.myna").write_text(
+            '@target(py)\n@bang(s:s)->s => s + "!"\n', encoding="utf-8"
+        )
+        (src / "uses_util.myna").write_text(
+            "@target(py)\n<.util:{bang}\n@shout(s:s)->s => bang(s).upper()\n",
+            encoding="utf-8",
+        )
+        (tests / "run_tests.myna").write_text(
+            "@target(py)\n"
+            "<.src.highlight:{highlight_code}\n"
+            "<.src.uses_util:{shout}\n"
+            'p(highlight_code("x"))\n'
+            'p(shout("hi"))\n',
+            encoding="utf-8",
+        )
+
+    def test_run_reports_missing_relative_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "util.myna").write_text(
+                '@target(py)\n@bang(s:s)->s => s + "!"\n', encoding="utf-8"
+            )
+            (root / "main.myna").write_text(
+                "@target(py)\n<.util:{slug}\np(slug(\"x\"))\n", encoding="utf-8"
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(root / "main.myna")],
+                cwd=pathlib.Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("relative module 'util' has no name 'slug'", proc.stderr)
+        self.assertIn("module root", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_run_module_root_reaches_sibling_src(self):
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._write_src_tests_layout(root)
+            entry = root / "tests" / "run_tests.myna"
+
+            def run(extra_args: list[str], env: dict | None = None):
+                return subprocess.run(
+                    [sys.executable, "-m", "myna", "run", *extra_args, str(entry)],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+
+            by_flag = run(["--module-root", str(root)])
+            by_env = run([], env={**os.environ, "MYNA_MODULE_ROOT": str(root)})
+            without_root = run([])
+            bundle = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "myna",
+                    "bundle",
+                    "--module-root",
+                    str(root),
+                    str(entry),
+                    "-o",
+                    str(root / "app.py"),
+                ],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            bundled_run = subprocess.run(
+                [sys.executable, "-I", str(root / "app.py")],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+            )
+
+        for proc in (by_flag, by_env, bundled_run):
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["<x>", "HI!"])
+
+        self.assertEqual(bundle.returncode, 0, bundle.stderr)
+        self.assertEqual(without_root.returncode, 1)
+        self.assertIn("--module-root", without_root.stderr)
+        self.assertIn("src", without_root.stderr)
+        self.assertNotIn("Traceback", without_root.stderr)
 
     def test_run_reports_parse_error_with_module_path(self):
         with tempfile.TemporaryDirectory() as tmp:
