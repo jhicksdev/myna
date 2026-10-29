@@ -132,8 +132,8 @@ The version must live in exactly one place.
    `python3 -m unittest discover -s tests -v`. Node must be available — do not accept a
    run where the JavaScript tests were skipped.
 6. Build the sdist and wheel, install the wheel in a clean virtual environment, and
-   smoke-test it: `myna --version`, `myna run` on an example, `myna compile -t js` on an
-   example.
+   smoke-test it: `myna --version`, `myna run` on an example, and `myna compile -t js`
+   and `-t ts` on an example.
 7. Tag `vX.Y.Z` and publish through `.github/workflows/publish.yml` (PyPI trusted
    publishing).
 8. Verify the published artifact: `pip install myna-lang==X.Y.Z` and confirm the version
@@ -221,3 +221,6 @@ Until then, the honest label is `0.y.z`.
   functional flag (`--module-root`), and a changed string-escape contract; it is a minor
   by §2. The `@target` default flip (D-003) is deferred to 0.6.0 and is deprecated as of
   0.5.0.
+- The unreleased TypeScript target (D-006) is a new target capability, so it is a minor
+  by §2. Its types are erased; the JavaScript runtime floor is unchanged, and the
+  TypeScript compiler is a dev-only test tool rather than a package dependency.

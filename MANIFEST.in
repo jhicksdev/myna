@@ -7,3 +7,4 @@ include DECISIONS.md
 recursive-include examples *.myna
 recursive-include skills *.md
 recursive-include tests *.py
+include tests/ts/package.json tests/ts/package-lock.json

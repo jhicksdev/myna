@@ -1,12 +1,12 @@
 # Myna Language Specification (v0.5)
 
-**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to minimize LLM token consumption while mapping 1-to-1 onto the semantics of **Python 3.12+** (normative) and a portable subset of **JavaScript (ES2024+)**.
+**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to minimize LLM token consumption while mapping 1-to-1 onto the semantics of **Python 3.12+** (normative) and a portable subset of **JavaScript (ES2024+)** and **TypeScript**.
 
 ## 1. Core Design Principles
 1. **Tokenizer-Aware ASCII Sigils:** Uses standard printable ASCII characters and 2-character digraphs (`~@`, `!!`, `<-`, `|>`, `:?`, `??`, `..`) that BPE tokenizers encode as 1–2 tokens. Never uses esoteric Unicode math symbols that split into multi-byte tokens.
 2. **Statement-Prefix vs. Infix Disambiguation:** Punctuation at the start of a statement acts as a structural keyword (`?` = `if`, `%` = `for/while`, `^` = `return`, `!` = `try/raise/assert`, `<` = `import`), while inside an expression it acts as a standard operator.
 3. **Brace-Delimited & Whitespace-Agnostic:** Blocks are enclosed in `{ ... }`. Statements end at a newline `\n`, semicolon `;`, or before `}`. Zero indentation tokens are required.
-4. **Cross-Target AST:** Every Myna construct maps deterministically to Python; the JavaScript target maps the portable core and rejects the rest explicitly.
+4. **Cross-Target AST:** Every Myna construct maps deterministically to Python; the JavaScript and TypeScript targets map the portable core and reject the rest explicitly.
 
 ### Target semantics
 
@@ -14,6 +14,13 @@ Python 3.12 is the normative semantics. The JavaScript target **emulates** those
 semantics with inlined helpers; a construct that cannot be emulated exactly is rejected
 for `-t js` with `TargetError` rather than approximated. See `DECISIONS.md` D-001 and
 D-002 for the target contract and the JavaScript portable-core scope.
+
+TypeScript is a **typed projection of the JavaScript target** (`DECISIONS.md` D-006).
+`-t ts` emits the same runtime helpers and portable core, uses the same `@target(py, js)`
+contract and `@target(js)` blocks, and raises the same `TargetError`s. Type annotations
+are erased and never add runtime checks; unannotated parameters are emitted as explicit
+`any`. A module whose annotations are truthful type-checks under `tsc --strict`.
+`myna run -t ts` is not supported; `-t js` executes the same program.
 
 ---
 
@@ -54,6 +61,11 @@ escapes as raw byte values, and reject `\u`, `\U`, and `\N`.
 | `{T}` | `set[T]` | `Set<T>` |
 | `(T1, T2)` | `tuple[T1, T2]` | `[T1, T2]` |
 
+`T?` appends `| null`. A list of a union is parenthesized (`(A | B)[]`). A dictionary
+whose key type is not a valid `Record` key (`string`, `number`, `symbol`, or a union of
+those) is emitted as `Record<string, V>`, matching JavaScript's string-coerced keys.
+JavaScript strips all annotations; TypeScript emits them.
+
 ---
 
 ## 3. Declarations, Scope & Modules
@@ -61,18 +73,18 @@ escapes as raw byte values, and reject `\u`, `\U`, and `\N`.
 | Myna | Python | JavaScript |
 | :--- | :--- | :--- |
 | `x = 1` | `x = 1` | `let x = 1;` |
-| `x:i = 1` | `x: int = 1` | `let x = 1;` |
+| `x:i = 1` | `x: int = 1` | `let x = 1;` (TS: `let x: number = 1;`) |
 | `x := 1` | `x = 1` (or `:=` inside expr) | `const x = 1;` |
 | `@= x, y` | `global x, y` | *(global scope)* |
 | `^= x, y` | `nonlocal x, y` | *(closure scope)* |
 | `~x` *(statement)* | `del x` | `delete x;` |
-| `$= Alias = Type` | `type Alias = Type` | `type Alias = Type;` |
+| `$= Alias = Type` | `type Alias = Type` | JS: type-only (stripped); TS: `export type Alias = Type;` |
 | `<os, sys` | `import os, sys` | `import * as os from 'os'; ...` |
 | `<numpy>np` | `import numpy as np` | `import * as np from 'numpy';` |
 | `<pathlib:{Path, PurePath>PP}` | `from pathlib import Path, PurePath as PP` | `import { Path, PurePath as PP } from 'pathlib';` |
 | `<.utils:{helper}` | `from .utils import helper` | `import { helper } from './utils.js';` |
-| `@target(py)` / `@target(py, js)` | module target contract (default: both) | same |
-| `@target(py) { ... }` | compile-time block, emitted only for Python | same (module-level only, imports become top-level) |
+| `@target(py)` / `@target(py, js)` | module target contract (default: both) | same (`js` also permits `-t ts`; there is no `@target(ts)`) |
+| `@target(py) { ... }` | compile-time block, emitted only for Python | same (module-level only, imports become top-level; `@target(js)` also applies to `-t ts`) |
 | `+@f(...)` / `+$C` | `def f(...)` + adds to `__all__` | `export function f(...)` / `export class C` |
 
 `@target(...)` with no block must be the first non-docstring statement and declares which targets the file supports; compiling for another target raises `TargetError`. With a block it selects the statements/imports emitted for that target. Target blocks are module-level only.
@@ -90,6 +102,13 @@ the way Python allows. `myna run -t js` compiles the reachable graph into `.mjs`
 a temporary directory and runs it with Node. `myna_to_js(source)` has no filesystem
 context, so it requires `source_path=` (or a `myna compile` of the file) when relative
 imports are present.
+
+The TypeScript target uses the same specifiers and module graph, including `.mjs` for
+`.mts` output. A relative import of a `$=` type alias is emitted as `import type`, and a
+type alias is exported with `export type`; using a type alias as a value is a
+`TargetError` for `-t ts`. `myna_to_ts(source)` likewise requires `source_path=` when
+relative imports are present. `myna run -t ts` is not supported; use `-t js` to execute
+the same program.
 
 ---
 

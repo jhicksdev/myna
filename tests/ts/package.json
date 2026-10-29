@@ -1,0 +1,9 @@
+{
+  "name": "myna-ts-tests",
+  "private": true,
+  "description": "Dev-only TypeScript toolchain for the Myna TypeScript target tests",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^7.0.2"
+  }
+}

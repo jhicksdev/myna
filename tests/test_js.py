@@ -437,6 +437,17 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
             ),
         )
 
+    def test_cross_target_empty_builtin_constructors(self):
+        src = """
+        @main {
+            p(@list())
+            p(@set())
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "[]\nset()")
+
     def test_cross_target_helper_dependencies(self):
         # `in` needs `eq`, `*` needs `add`; using either alone must still emit its deps.
         src = """

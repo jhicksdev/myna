@@ -5,7 +5,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/myna-lang?style=flat-square&logo=python&logoColor=white)](https://pypi.org/project/myna-lang/)
 [![License: MIT](https://img.shields.io/github/license/jhicksdev/myna?style=flat-square&color=yellow)](https://github.com/jhicksdev/myna/blob/main/LICENSE)
 
-**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to cut LLM token and character usage by **~50%** while transpiling 1:1 to **Python 3.12+** and to a bounded **JavaScript (ES2024+)** target—and decompiling existing Python code back into Myna.
+**Myna** is an ultra-dense, symbol-based, AI-native programming language designed to cut LLM token and character usage by **~50%** while transpiling 1:1 to **Python 3.12+** and to bounded **JavaScript (ES2024+)** and **TypeScript** targets—and decompiling existing Python code back into Myna.
 
 ---
 
@@ -16,7 +16,7 @@ Coding agents spend thousands of context and output tokens on repetitive syntact
 Myna replaces verbose multi-token boilerplate with **tokenizer-friendly ASCII sigils and digraphs** (`$$`, `@`, `~@`, `=>`, `??`, `!?`, `!&`, `$`, `$?`) and brace-delimited blocks (`{}`):
 - **~46%–52% fewer LLM tokens** and **~48%–58% fewer characters** than equivalent Python (compact and ultra-compact modes).
 - **Zero indentation fragility:** Blocks use `{ ... }` or `=>`, making partial diffs and single-line generation rock-solid for AI agents.
-- **Bi-directional (`Python <-> Myna`) & Multi-Target (`Myna -> Python / JS`):** Compress existing Python codebases into `.myna` to fit twice as much code into an agent's context window, or let agents write `.myna` and transpile to clean Python or JavaScript.
+- **Bi-directional (`Python <-> Myna`) & Multi-Target (`Myna -> Python / JS / TS`):** Compress existing Python codebases into `.myna` to fit twice as much code into an agent's context window, or let agents write `.myna` and transpile to clean Python, JavaScript, or typed TypeScript.
 - **Agent-Ready:** Ships with a compact Rosetta Stone skill (`skills/myna/SKILL.md`) that teaches any coding agent to read and write idiomatic Myna in one shot.
 
 ---
@@ -96,6 +96,9 @@ python3 -m myna compile examples/rest_api.myna -o rest_api.py
 # Compile Myna -> JavaScript (.js)
 python3 -m myna compile -t js examples/cross_target.myna -o cross_target.js
 
+# Compile Myna -> TypeScript (.ts), or infer it from the output extension
+python3 -m myna compile -t ts examples/cross_target.myna -o cross_target.ts
+
 # Bundle a multi-file program into one standalone Python file
 python3 -m myna bundle src/main.myna -o app.py
 
@@ -111,7 +114,7 @@ python3 -m myna decompile -m script.py -o script.min.myna
 # Compare token & character efficiency
 python3 -m myna stats examples/books_api.myna
 
-# Report declared/inferred Python & JavaScript support
+# Report declared/inferred Python, JavaScript & TypeScript support
 python3 -m myna targets examples/demo.myna
 ```
 
@@ -194,6 +197,76 @@ equivalent), so an imported module's entry block stays dormant.
 whether a file *generates* for a target; the test suite also executes the Node output and
 runs `node --check` on every generated file.
 
+### TypeScript target
+
+`myna compile -t ts` emits `.ts` (or `.mts`) modules. TypeScript is a **typed projection
+of the JavaScript target**, not a third semantics: it uses the same helpers, the same
+Portable Core, the same `TargetError`s, and the same `@target(py, js)` contract. There is
+no `@target(ts)`; `@target(js)` blocks are emitted for TypeScript. Type annotations are
+**erased** and never add runtime checks. `myna run -t ts` is not supported in this
+release (use `-t js` to execute the same program).
+
+Annotations become TypeScript types where Myna has them:
+
+| Myna | TypeScript |
+| :--- | :--- |
+| `i`, `f` | `number` |
+| `s` | `string` |
+| `b` | `boolean` |
+| `B` | `Uint8Array` |
+| `A` | `any` |
+| `N` | `null` |
+| `T?` | `T \| null` |
+| `[T]` | `T[]` |
+| `{K:V}` | `Record<K, V>` |
+| `{T}` | `Set<T>` |
+| `(T1, T2)` | `[T1, T2]` |
+| `Name[T]` | `Name<T>` |
+
+`$= Alias = Type` becomes `export type Alias = Type`, and a relative import of a type
+alias becomes `import type`; every other top-level binding is exported as before.
+Unannotated parameters are emitted as explicit `any` (not implicit), and a function with
+a declared return type gets a `null as any` fallback where Python could fall off the end.
+
+The guarantee is that a module whose annotations are truthful passes `tsc --strict`.
+`tsc` also rejects a Myna annotation that does not match the value (for example
+`@f(x:i)->s => 1`); `myna compile` still emits the file. TypeScript is advisory, like
+Python annotations.
+
+Recommended `tsconfig.json` for direct Node execution:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "types": ["node"]
+  }
+}
+```
+
+Use `.mts`, or set `"type": "module"` in `package.json`, so NodeNext treats the files as
+ES modules; otherwise `import.meta.filename` (the `@main` guard) is rejected. Bundler
+users can use `"module": "ESNext"` and `"moduleResolution": "Bundler"` instead.
+`@types/node` is required for `@main`, `p`, and the `Uint8Array`/`TextEncoder` helpers.
+Relative-import specifiers are `./util.js` (`./util.mjs` for `.mts` output), so `tsc`
+resolves them to the generated `.ts` files.
+
+The JavaScript limits apply unchanged. TypeScript-specific limits: no decorators
+(NestJS/Angular-style), no JSX/TSX, no `implements`, and no generic declarations.
+Classes only declare fields found in the class body, dataclass fields, or `self.x =`
+assignments inside methods; dynamically added attributes need a declaration. Tuples and
+lists are both arrays, and dictionary keys are string-coerced at runtime, so
+`Record<K, V>` is advisory; a non-key-compatible `K` is emitted as `Record<string, V>`.
+Strict TypeScript also rejects dynamically retyped locals; annotate them with `A`.
+
+The test suite compiles the cross-target corpus with `tsc --strict`, transpiles it, and
+executes it with Node alongside the Python output. The dev-only toolchain lives in
+`tests/ts/package.json`; run `npm ci --prefix tests/ts` to enable the TypeScript tests
+locally.
+
 ---
 
 ## Token & Character Efficiency Benchmarks
@@ -220,9 +293,9 @@ Running `stats` directly on a `.myna` file instead compares the generated Python
 | Feature | Myna Syntax | Python Equivalent | JavaScript Equivalent |
 | :--- | :--- | :--- | :--- |
 | **Literals** | `T`, `F`, `N`, `U`, `_` | `True`, `False`, `None`, `None`, `pass` | `true`, `false`, `null`, `undefined`, `/*noop*/` |
-| **Types** | `i`, `f`, `s`, `b`, `B`, `A`, `T?`, `[T]`, `{K:V}` | `int`, `float`, `str`, `bool`, `bytes`, `Any`, `T \| None`, `list[T]`, `dict[K, V]` | *(Type annotations stripped in JS)* |
+| **Types** | `i`, `f`, `s`, `b`, `B`, `A`, `T?`, `[T]`, `{K:V}` | `int`, `float`, `str`, `bool`, `bytes`, `Any`, `T \| None`, `list[T]`, `dict[K, V]` | JS strips annotations; TS emits `number`, `string`, `boolean`, `Uint8Array`, `any`, `T \| null`, `T[]`, `Record<K, V>` |
 | **Imports** | `<os, numpy>np` / `<mod:{a, b>c}` | `import os, numpy as np` / `from mod import a, b as c` | `import * as ...` / `import { a, b as c } from ...` |
-| **Targets** | `@target(py)` / `@target(py) { ... }` | Python-only module / Python-only block | JS-only module / JS-only block |
+| **Targets** | `@target(py)` / `@target(py) { ... }` | Python-only module / Python-only block | JS/TS-only module / block (`@target(js)` also applies to `-t ts`) |
 | **Functions** | `@f(a:i, b=1)->i { ^a+b }` or `@f(a)=>a+1` | `def f(a: int, b=1) -> int: return a + b` | `function f(a, b = 1) { return a + b; }` |
 | **Async / Gen** | `~@f` / `~expr` / `*@gen` / `^*val` | `async def` / `await` / generator / `yield` | `async function` / `await` / `function*` / `yield` |
 | **Classes** | `$C < Base { @init(x){ .x=x } }` | `class C(Base): def __init__(self, x): self.x = x` | `class C extends Base { constructor(x) { this.x = x; } }` |
@@ -244,8 +317,13 @@ See [`SPEC.md`](https://github.com/jhicksdev/myna/blob/main/SPEC.md) for the com
 ## Running Tests
 
 ```bash
+npm ci --prefix tests/ts          # dev-only TypeScript compiler + Node types
 python3 -m unittest discover -s tests -v
 ```
+
+The TypeScript tests use `tests/ts/node_modules/.bin/tsc`; without it (and Node on
+`PATH`) the executable TypeScript cases are skipped, but CI installs the toolchain and
+runs them.
 
 ---
 

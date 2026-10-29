@@ -4,6 +4,11 @@ Myna semantics are Python semantics (see ``DECISIONS.md`` D-001).  JavaScript is
 bounded target: constructs that can be emulated exactly use the inlined ``__myna_*``
 helpers below, and constructs that cannot are rejected with ``TargetError`` instead of
 being approximated.
+
+``backends/ts_gen.py`` subclasses :class:`JSGenerator` and reuses these helper bodies
+with erased type annotations (D-006).  The small hooks below (``return_annotation``,
+``catch_clause``, ``builtin_value``, ``lambda_param``, ``function_fallthrough``, and
+``export_lines``) exist so the TypeScript target does not need a copy of the generator.
 """
 
 from __future__ import annotations
@@ -499,6 +504,28 @@ class JSGenerator:
     def ind(self) -> str:
         return self.indent_str * self.indent_level
 
+    # Subclass hooks.  The JavaScript target emits none of these; the TypeScript
+    # backend uses them to add erased type syntax without duplicating the generator.
+    def return_annotation(self, fn: ast.FuncDef) -> str:
+        """Return a `: T` annotation for a function header, or the empty string."""
+        return ""
+
+    def catch_clause(self, evar: str) -> str:
+        """Return the `catch (...)` clause header for a bound exception variable."""
+        return f"catch ({evar})"
+
+    def function_fallthrough(self, fn: ast.FuncDef) -> list[str]:
+        """Lines emitted at the end of a function body, before the closing brace."""
+        return []
+
+    def builtin_value(self, name: str) -> Optional[str]:
+        """Return the JavaScript expression for a first-class builtin alias."""
+        return BUILTIN_VALUES.get(name)
+
+    def lambda_param(self, name: str) -> str:
+        """Render an internal lambda parameter (the TypeScript target annotates it)."""
+        return name
+
     def push_scope(self, initial: Optional[set[str]] = None) -> None:
         self.scopes.append(set(initial or set()))
 
@@ -568,20 +595,27 @@ class JSGenerator:
         for stmt in mod.body:
             lines.extend(self.gen_stmt(stmt))
 
-        # ES modules do not leak bindings: every top-level Python name that another
-        # module can import must be exported. Names already exported inline by `+@`
-        # are skipped so a module never declares the same export twice.
-        export_names = [n for n in module_bindings(mod) if n not in self.inline_exports]
-        if export_names:
-            specs = []
-            for name in export_names:
-                bound = js_ident(name)
-                specs.append(bound if bound == name else f"{bound} as {name}")
-            lines.append(f"export {{ {', '.join(specs)} }};")
+        lines.extend(self.export_lines(mod))
 
         helpers = self._helper_lines()
         all_lines = (helpers + [""] + lines) if (helpers and lines) else (helpers + lines)
         return "\n".join(all_lines).rstrip() + "\n"
+
+    def export_lines(self, mod: ast.Module) -> list[str]:
+        """Emit the trailing export list for every importable top-level binding.
+
+        ES modules do not leak bindings: every top-level Python name that another
+        module can import must be exported. Names already exported inline by `+@`
+        are skipped so a module never declares the same export twice.
+        """
+        export_names = [n for n in module_bindings(mod) if n not in self.inline_exports]
+        if not export_names:
+            return []
+        specs = []
+        for name in export_names:
+            bound = js_ident(name)
+            specs.append(bound if bound == name else f"{bound} as {name}")
+        return [f"export {{ {', '.join(specs)} }};"]
 
     def _scan_classes(self, mod: ast.Module) -> None:
         for stmt in mod.body:
@@ -876,8 +910,16 @@ class JSGenerator:
 
     def gen_func_def(self, fn: ast.FuncDef) -> list[str]:
         self.declare(fn.name)
-        export_prefix = "export " if (fn.exported and self.indent_level == 0) else ""
-        if export_prefix:
+        # A renamed binding (JS reserved word) is exported by the trailing export
+        # list, which can alias it back to the source name; `export function $name`
+        # would make the source name unimportable.
+        inline_export = (
+            fn.exported
+            and self.indent_level == 0
+            and js_ident(fn.name) == fn.name
+        )
+        export_prefix = "export " if inline_export else ""
+        if inline_export:
             self.inline_exports.add(fn.name)
         async_prefix = "async " if fn.is_async else ""
         star_suffix = "*" if fn.is_generator else ""
@@ -894,23 +936,25 @@ class JSGenerator:
         self.push_scope(param_names)
         self.loop_stack.append(None)
         lines: list[str] = []
+        ret_ann = self.return_annotation(fn)
 
         if self.in_class:
             if fn.method_kind == "init":
                 header = f"{self.ind()}constructor({', '.join(param_strs)}) {{"
             elif fn.method_kind in ("static", "classmethod"):
-                header = f"{self.ind()}static {async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}) {{"
+                header = f"{self.ind()}static {async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}){ret_ann} {{"
             elif fn.method_kind == "property":
-                header = f"{self.ind()}get {fn.name}() {{"
+                header = f"{self.ind()}get {fn.name}(){ret_ann} {{"
             elif fn.method_kind == "setter":
                 header = f"{self.ind()}set {fn.name}({', '.join(param_strs)}) {{"
             else:
-                header = f"{self.ind()}{async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}) {{"
+                header = f"{self.ind()}{async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}){ret_ann} {{"
         else:
-            header = f"{self.ind()}{export_prefix}{async_prefix}function{star_suffix} {js_ident(fn.name)}({', '.join(param_strs)}) {{"
+            header = f"{self.ind()}{export_prefix}{async_prefix}function{star_suffix} {js_ident(fn.name)}({', '.join(param_strs)}){ret_ann} {{"
 
         lines.append(header)
         lines.extend(self.gen_block(fn.body, new_scope=False))
+        lines.extend(self.function_fallthrough(fn))
         lines.append(f"{self.ind()}}}")
 
         # Apply decorators if present outside class
@@ -942,8 +986,13 @@ class JSGenerator:
 
         self.declare(cls.name)
         self.known_classes.add(cls.name)
-        export_prefix = "export " if (cls.exported and self.indent_level == 0) else ""
-        if export_prefix:
+        inline_export = (
+            cls.exported
+            and self.indent_level == 0
+            and js_ident(cls.name) == cls.name
+        )
+        export_prefix = "export " if inline_export else ""
+        if inline_export:
             self.inline_exports.add(cls.name)
         ext_part = ""
         if cls.bases:
@@ -1167,7 +1216,7 @@ class JSGenerator:
 
         if stmt.handlers:
             evar = "__myna_exc"
-            lines.append(f"{ind}}} catch ({evar}) {{")
+            lines.append(f"{ind}}} {self.catch_clause(evar)} {{")
             self.indent_level += 1
             if has_else:
                 lines.append(f"{self.ind()}__myna_ok = false;")
@@ -1467,7 +1516,7 @@ class JSGenerator:
             self.use_helper("print")
             return "__myna_print"
         if name.startswith("@"):
-            value = BUILTIN_VALUES.get(name)
+            value = self.builtin_value(name)
             if value is None:
                 raise TargetError(
                     f"builtin '{name}' is not supported by the JavaScript target"
@@ -1502,7 +1551,7 @@ class JSGenerator:
             body = f"__myna_truthy(__v) ? __v : {right}"
         else:
             body = f"__myna_truthy(__v) ? {right} : __v"
-        return f"((__v) => {body})({left})"
+        return f"(({self.lambda_param('__v')}) => {body})({left})"
 
     def _js_isinstance(self, subject: str, expr: ast.Expr) -> str:
         if isinstance(expr, ast.Ident):
@@ -1523,7 +1572,7 @@ class JSGenerator:
             # `(A, B)` in a runtime check is a union; bind the subject once so it is
             # not evaluated repeatedly inside the `||` chain.
             inner = " || ".join(self._js_isinstance("__v", e) for e in expr.elts) or "false"
-            return f"((__v) => {inner})({subject})"
+            return f"(({self.lambda_param('__v')}) => {inner})({subject})"
         # Compound type expressions check their runtime origin type.
         if isinstance(expr, ast.ListExpr):
             return f"Array.isArray({subject})"
@@ -1562,6 +1611,12 @@ class JSGenerator:
                             f"unsupported keyword '{k}' for '@srt' on the JavaScript target"
                         )
                 return f"__myna_sort({arr_s}, {key_s}, {reverse_s})"
+
+            if fn == "@set" and not call.args and not call.keywords:
+                return "new Set()"
+
+            if fn in ("@list", "@tuple") and not call.args and not call.keywords:
+                return "[]"
 
             if fn == "@set" and len(call.args) == 1 and not call.keywords:
                 return f"new Set({self.gen_expr(call.args[0])})"

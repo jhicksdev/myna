@@ -1,9 +1,10 @@
-"""Myna: An AI-friendly, ultra-dense symbolic language that transpiles to Python and JavaScript."""
+"""Myna: An AI-friendly, ultra-dense symbolic language that transpiles to Python, JavaScript, and TypeScript."""
 
 from myna.lexer import tokenize, LexError
 from myna.parser import parse, ParseError
 from myna.backends.python_gen import compile_to_python
 from myna.backends.js_gen import compile_to_js
+from myna.backends.ts_gen import compile_to_ts
 from myna.frontends.python_decompile import DecompileError, decompile_python
 from myna.targets import TargetError
 
@@ -40,6 +41,29 @@ def myna_to_js(
     )
 
 
+def myna_to_ts(
+    source: str,
+    *,
+    source_path: str | None = None,
+    module_ext: str = ".js",
+    import_base: str | None = None,
+) -> str:
+    """Compile Myna source code to TypeScript source code.
+
+    TypeScript is a typed projection of the JavaScript target: the runtime behaviour
+    and the portable-core boundary are identical to :func:`myna_to_js`, and type
+    annotations are erased.  ``module_ext`` is the extension of the JavaScript files
+    that relative-import specifiers point at (``.js``, or ``.mjs`` for ``.mts`` output).
+    """
+    ast_mod = parse(source)
+    return compile_to_ts(
+        ast_mod,
+        source_path=source_path,
+        module_ext=module_ext,
+        import_base=import_base,
+    )
+
+
 def python_to_myna(source: str, compact: bool = True, minify_locals: bool = False) -> str:
     """Decompile/compress Python source code into Myna source code."""
     return decompile_python(source, compact=compact, minify_locals=minify_locals)
@@ -50,9 +74,11 @@ __all__ = [
     "parse",
     "compile_to_python",
     "compile_to_js",
+    "compile_to_ts",
     "decompile_python",
     "myna_to_python",
     "myna_to_js",
+    "myna_to_ts",
     "python_to_myna",
     "LexError",
     "ParseError",

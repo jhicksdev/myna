@@ -18,6 +18,7 @@ from myna import (
     TargetError,
     myna_to_js,
     myna_to_python,
+    myna_to_ts,
     python_to_myna,
 )
 
@@ -577,6 +578,53 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertIn("js       : unsupported", report.stdout)
         self.assertEqual(compile_js.returncode, 1)
         self.assertIn("module declares @target(py)", compile_js.stderr)
+
+    def test_typescript_api_and_cli(self):
+        src = "@target(py, js)\n@double(x:i)->i => x * 2\n"
+        self.assertIn("function double(x: number): number", myna_to_ts(src))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = pathlib.Path(tmp) / "portable.myna"
+            source.write_text(src, encoding="utf-8")
+            out = pathlib.Path(tmp) / "portable.ts"
+            cwd = pathlib.Path(__file__).resolve().parents[1]
+
+            compiled = subprocess.run(
+                [sys.executable, "-m", "myna", "compile", str(source), "-o", str(out)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            self.assertIn("function double(x: number): number", out.read_text())
+
+            report = subprocess.run(
+                [sys.executable, "-m", "myna", "targets", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(report.returncode, 0, report.stderr)
+            self.assertIn("ts       : supported", report.stdout)
+
+            run = subprocess.run(
+                [sys.executable, "-m", "myna", "run", "-t", "ts", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("compile-only", run.stderr)
+
+            source.write_text("@target(py)\nvalue = 1\n", encoding="utf-8")
+            rejected = subprocess.run(
+                [sys.executable, "-m", "myna", "compile", "-t", "ts", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(rejected.returncode, 1)
+            self.assertIn("target 'ts'", rejected.stderr)
 
     def test_run_resolves_relative_myna_modules(self):
         with tempfile.TemporaryDirectory() as tmp:

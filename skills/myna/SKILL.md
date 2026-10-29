@@ -1,16 +1,17 @@
 ---
 name: myna
-description: Read, write, and transpile Myna (.myna), an ultra-dense symbolic AI-native programming language that transpiles 1:1 to and from Python. Activate whenever working with .myna files, compressing Python code for token efficiency, or writing Myna code.
+description: Read, write, and transpile Myna (.myna), an ultra-dense symbolic AI-native programming language that transpiles 1:1 to and from Python, plus JavaScript and TypeScript. Activate whenever working with .myna files, compressing Python code for token efficiency, or writing Myna code.
 ---
 
 # Myna Language Skill for Coding Agents
 
-**Myna** is an indentation-free, brace-delimited (`{}`), symbol-dense language that maps 1:1 to Python 3.12+ (and JavaScript). Statements end at a newline `\n`, semicolon `;`, or before `}`.
+**Myna** is an indentation-free, brace-delimited (`{}`), symbol-dense language that maps 1:1 to Python 3.12+ (and JavaScript/TypeScript). Statements end at a newline `\n`, semicolon `;`, or before `}`.
 
 ## 1. CLI Commands
 ```bash
 python3 -m myna compile input.myna -o output.py   # Compile Myna -> Python
 python3 -m myna compile input.myna -t js          # Compile Myna -> JavaScript (ES2024+)
+python3 -m myna compile input.myna -t ts          # Compile Myna -> TypeScript (.ts/.mts)
 python3 -m myna decompile input.py -o output.myna # Compress Python -> Myna (-m for ultra-compact)
 python3 -m myna run script.myna                   # Execute .myna via Python
 python3 -m myna run -t js script.myna             # Execute .myna via Node.js
@@ -28,23 +29,30 @@ faithful JS equivalent raise `TargetError` instead of producing wrong output. Re
 imports become relative ES module specifiers, every top-level binding is exported, and
 `myna run -t js` compiles the whole reachable graph to `.mjs` files before running Node.
 
+TypeScript is a **typed projection of the JavaScript target**: `-t ts` uses the same
+helpers, Portable Core, `@target(py, js)` contract, and `@target(js)` blocks, and emits
+the same `TargetError`s. Annotations are erased; unannotated parameters become explicit
+`any`; `$=` becomes `export type` and a relative import of an alias becomes `import type`.
+A module whose annotations are truthful passes `tsc --strict`. There is no
+`@target(ts)`. `myna run -t ts` is compile-only in this release; use `-t js` to execute.
+
 ## 2. Complete Symbol Rosetta Stone
 
 ### Literals, Types & Constants
 - `T` = `True`, `F` = `False`, `N` = `None`, `_` (standalone in `{_}`) = `pass`
 - `` `hi {x:.2f}` `` = `f"hi {x:.2f}"` (escapes: `` \` ``, `\\`, `\n`, `\t`, `\r`, `\a`, `\b`, `\f`, `\v`, `\xNN`, `\uNNNN`, `\ooo`; unknown escapes are errors), `_"raw"` = `r"raw"`, `0b"bytes"` = `b"bytes"` (literal text is UTF-8; `\xNN`/octal escapes are raw bytes)
-- **Types:** `i`=`int`, `f`=`float`, `s`=`str`, `b`=`bool`, `B`=`bytes`, `A`=`Any`, `N`=`None`
-- **Compound Types:** `T?`=`T | None`, `[T]`=`list[T]`, `{K:V}`=`dict[K, V]`, `{T}`=`set[T]`, `(T1,T2)`=`tuple[T1, T2]`
+- **Types:** `i`=`int`, `f`=`float`, `s`=`str`, `b`=`bool`, `B`=`bytes`, `A`=`Any`, `N`=`None` (TS: `number`, `number`, `string`, `boolean`, `Uint8Array`, `any`, `null`)
+- **Compound Types:** `T?`=`T | None`, `[T]`=`list[T]`, `{K:V}`=`dict[K, V]`, `{T}`=`set[T]`, `(T1,T2)`=`tuple[T1, T2]` (TS: `T | null`, `T[]`, `Record<K, V>`, `Set<T>`, `[T1, T2]`)
 
 ### Imports, Scope & Bindings
 - `<os, sys` → `import os, sys`
 - `<numpy>np` → `import numpy as np`
 - `<pathlib:{Path, PurePath>PP}` → `from pathlib import Path, PurePath as PP`
-- `<.utils:{helper}` → `from .utils import helper`; relative imports resolve from the importing module's directory (`.pkg.mod` → `pkg/mod.myna`, directories need no `__init__.myna`). For `myna run`, the entry file's imports resolve from its own directory or from `--module-root DIR` / `MYNA_MODULE_ROOT`; `<.util` (no list) binds the module object. For `-t js` they become `./utils.js` specifiers.
+- `<.utils:{helper}` → `from .utils import helper`; relative imports resolve from the importing module's directory (`.pkg.mod` → `pkg/mod.myna`, directories need no `__init__.myna`). For `myna run`, the entry file's imports resolve from its own directory or from `--module-root DIR` / `MYNA_MODULE_ROOT`; `<.util` (no list) binds the module object. For `-t js` they become `./utils.js` specifiers; `-t ts` uses the same specifiers.
 - `@=x, y` → `global x, y` | `^=x, y` → `nonlocal x, y` | `~x[k]` → `del x[k]`
-- `$=Alias = [i]` → `type Alias = list[int]`
-- `@target(py)` → module is Python-only; `@target(py, js)` is portable (default: both). Must precede all code.
-- `@target(py) { <asyncio; ... }` / `@target(js) { ... }` → module-level compile-time block; only the matching target's statements/imports are emitted.
+- `$=Alias = [i]` → `type Alias = list[int]` (TS: `export type Alias = number[];`)
+- `@target(py)` → module is Python-only; `@target(py, js)` is portable (default: both). Must precede all code. `js` also permits `-t ts`; there is no `@target(ts)`.
+- `@target(py) { <asyncio; ... }` / `@target(js) { ... }` → module-level compile-time block; only the matching target's statements/imports are emitted (`js` blocks also apply to `-t ts`).
 
 ### Functions, Classes & Decorators
 - `@f(a:i, b=1)->i { ^a+b }` → `def f(a: int, b=1) -> int: return a + b`

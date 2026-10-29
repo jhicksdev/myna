@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Added
+
+- TypeScript: `myna compile -t ts` (and `myna_to_ts`) emits typed `.ts`/`.mts` modules.
+  TypeScript is a typed projection of the JavaScript target: it uses the same runtime
+  helpers, Portable Core, `@target(py, js)` contract, `@target(js)` blocks, and
+  `TargetError`s. `$=` becomes `export type`, a relative import of an alias becomes
+  `import type`, and annotations are erased. Unannotated parameters are explicit `any`;
+  truthful annotations pass `tsc --strict`. `myna run -t ts` is compile-only in this
+  release. See `DECISIONS.md` D-006 and the README TypeScript section.
+- `myna targets` reports `ts` alongside `py`/`js`; an output extension of `.ts`/`.mts`
+  selects the target when `-t` is omitted.
+- `myna_to_ts()` / `compile_to_ts()` are exported from `myna`; a new
+  `myna.modules.module_type_aliases()` lets the generator emit type-only imports.
+
+### Fixed
+
+- JavaScript/TypeScript: `+@`/`+$` declarations whose names are JavaScript reserved
+  words (for example `+@default`) are exported under the source name instead of an
+  unimportable `$`-prefixed binding.
+
+### Documentation
+
+- Document the TypeScript target, its type mapping, `tsconfig` requirements, and limits
+  in `SPEC.md`, `README.md`, and `skills/myna/SKILL.md`.
+
 ## 0.5.0 (2026-10-28)
 
 ### Added
