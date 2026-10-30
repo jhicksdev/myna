@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from myna.lexer import TT, LexError, Token, decode_escape, tokenize
+from myna.shorthands import EXPRESSION_SHORTHANDS
 from myna.targets import VALID_TARGETS
 import myna.ast_nodes as ast
 
@@ -1073,6 +1074,14 @@ class Parser:
 
         # Built-in `@` call shorthands in expressions: `@enum`, `@zip`, `@map`, `@flt`, `@srt`, `@rev`, `@sum`, `@min`, `@max`, `@str`, `@int`, `@set`, `@list`, `@dict`
         if tok.type == TT.AT and self.peek().type == TT.IDENT:
+            name_tok = self.peek()
+            if "@" + name_tok.value not in EXPRESSION_SHORTHANDS:
+                raise ParseError(
+                    f"'@' starts a declaration and cannot appear in an expression; "
+                    f"'{name_tok.value}' is not a builtin shorthand (did you mean "
+                    f"'{name_tok.value}' without '@'?)",
+                    tok,
+                )
             self.pos += 1
             ident = self.expect(TT.IDENT)
             return ast.Ident(name="@" + ident.value, line=tok.line, col=tok.col)

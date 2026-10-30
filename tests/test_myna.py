@@ -225,6 +225,30 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["z"], 7)
         self.assertEqual(ns["__all__"], ["exported"])
 
+    def test_decorator_sigil_is_rejected_in_expressions(self):
+        """`p(@f(2))` must not emit invalid Python for an unrecognised `@name`."""
+        with self.assertRaises(ParseError) as ctx:
+            myna_to_python("@f(x:i)->i { ^x }\n@main { p(@f(2)) }\n")
+        self.assertIn("cannot appear in an expression", str(ctx.exception))
+
+        with self.assertRaises(ParseError):
+            myna_to_python('x = @nope("a")\n')
+
+        # Every builtin shorthand still parses in expression position, including the
+        # codec helpers that the JavaScript value table provides.
+        src = """
+        xs = [3, 1, 2]
+        a = @srt(xs)
+        b = @max(1, 2)
+        c = len(@list(xs))
+        d = @u8d(@u8("hi"))
+        """
+        ns = self.exec_myna(src)
+        self.assertEqual(ns["a"], [1, 2, 3])
+        self.assertEqual(ns["b"], 2)
+        self.assertEqual(ns["c"], 3)
+        self.assertEqual(ns["d"], "hi")
+
     def test_tuple_condition_with_arrow_body(self):
         src = """
         @shrink(token, first, second) {

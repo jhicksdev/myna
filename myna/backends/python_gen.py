@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import myna.ast_nodes as ast
+from myna.shorthands import BUILTIN_SHORTHANDS
 from myna.targets import enforce_module_target, expand_target_blocks
 
 
@@ -17,52 +18,6 @@ TYPE_SHORTHANDS = {
     "N": "None",
 }
 
-BUILTIN_SHORTHANDS = {
-    "p": "print",
-    "@j": "json.loads",
-    "@J": "json.dumps",
-    "@enum": "enumerate",
-    "@zip": "zip",
-    "@map": "map",
-    "@flt": "filter",
-    "@srt": "sorted",
-    "@rev": "reversed",
-    "@sum": "sum",
-    "@min": "min",
-    "@max": "max",
-    "@abs": "abs",
-    "@all": "all",
-    "@any": "any",
-    "@str": "str",
-    "@int": "int",
-    "@float": "float",
-    "@bool": "bool",
-    "@list": "list",
-    "@dict": "dict",
-    "@set": "set",
-    "@tuple": "tuple",
-    "@type": "type",
-    "@repr": "repr",
-    "@id": "id",
-    "@dir": "dir",
-    "@vars": "vars",
-    "@open": "open",
-    "@inp": "input",
-    "@chr": "chr",
-    "@ord": "ord",
-    "@hex": "hex",
-    "@bin": "bin",
-    "@oct": "oct",
-    "@pow": "pow",
-    "@rnd": "round",
-    "@hash": "hash",
-    "@iter": "iter",
-    "@next": "next",
-    "@get": "getattr",
-    "@set_a": "setattr",
-    "@has": "hasattr",
-    "@del_a": "delattr",
-}
 
 
 class PythonGenerator:
