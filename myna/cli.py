@@ -20,6 +20,7 @@ from myna import (
     __version__,
     myna_to_python,
     myna_to_js,
+    myna_to_ts,
     parse,
     python_to_myna,
 )
@@ -67,14 +68,22 @@ def count_tokens(text: str) -> tuple[int, str]:
 def cmd_compile(args: argparse.Namespace) -> int:
     src = Path(args.input).read_text(encoding="utf-8") if args.input != "-" else sys.stdin.read()
     target = args.target
-    if target is None and args.output and str(args.output).endswith((".js", ".mjs")):
+    output_suffix = Path(args.output).suffix if args.output else ""
+    if target is None and output_suffix in (".js", ".mjs"):
         target = "js"
-    if target == "js":
-        # Relative imports become specifiers for sibling output files, so the emitted
-        # extension follows the output file (Node treats `.mjs` as an ES module).
-        module_ext = ".mjs" if args.output and str(args.output).endswith(".mjs") else ".js"
-        source_path = None if args.input == "-" else args.input
-        code = myna_to_js(src, source_path=source_path, module_ext=module_ext)
+    elif target is None and output_suffix in (".ts", ".mts"):
+        target = "ts"
+    source_path = None if args.input == "-" else args.input
+    if target in ("js", "ts"):
+        # Relative imports become specifiers for sibling JavaScript files, so the
+        # emitted extension follows the output file (Node treats `.mjs` as an ES
+        # module).  TypeScript sources use the same `.js`/`.mjs` specifiers because
+        # `tsc` (NodeNext) resolves them to the generated `.ts` files.
+        module_ext = ".mjs" if output_suffix in (".mjs", ".mts") else ".js"
+        if target == "js":
+            code = myna_to_js(src, source_path=source_path, module_ext=module_ext)
+        else:
+            code = myna_to_ts(src, source_path=source_path, module_ext=module_ext)
     else:
         code = myna_to_python(src)
     if args.output:
@@ -176,6 +185,13 @@ def _run_python_entry(
 def cmd_run(args: argparse.Namespace) -> int:
     src_path = Path(args.input)
     module_root = _module_root(args)
+    if args.target == "ts":
+        print(
+            "myna: TypeScript is a compile-only target in this release; "
+            "use `myna compile -t ts`, or `myna run -t js` to execute the same program",
+            file=sys.stderr,
+        )
+        return 1
     if args.target == "js":
         entry = src_path.resolve()
         with tempfile.TemporaryDirectory(prefix="myna-js-") as tmp:
@@ -267,9 +283,13 @@ def cmd_targets(args: argparse.Namespace) -> int:
     print(f"=== Target Report ({args.input}) ===")
     print(f"Declared : {declared}")
 
-    for target, compile_fn in (("py", myna_to_python), ("js", myna_to_js)):
+    for target, compile_fn in (
+        ("py", myna_to_python),
+        ("js", myna_to_js),
+        ("ts", myna_to_ts),
+    ):
         try:
-            if target == "js":
+            if target in ("js", "ts"):
                 compile_fn(src, source_path=source_path)
             else:
                 compile_fn(src)
@@ -280,16 +300,19 @@ def cmd_targets(args: argparse.Namespace) -> int:
             print(f"{target:<9}: unsupported — {type(exc).__name__}: {exc}")
             continue
 
+        block_target = "js" if target == "ts" else target
         imports = [
             alias.name
-            for stmt in expand_target_blocks(mod, target).body
+            for stmt in expand_target_blocks(mod, block_target).body
             for alias in (stmt.names if isinstance(stmt, (ast.ImportStmt, ast.ImportFromStmt)) else [])
         ]
         note = ""
-        if target == "js":
+        if target in ("js", "ts"):
             python_only = [name for name in imports if name.split(".")[0] in sys.stdlib_module_names]
             if python_only:
                 note = f" — imports Python stdlib that Node cannot resolve: {', '.join(python_only)}"
+            if target == "ts":
+                note += " (typed projection of the JavaScript target)"
         elif any(name.startswith("node:") for name in imports):
             note = " — imports Node-only modules"
         print(f"{target:<9}: supported (generation only){note}")
@@ -308,10 +331,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_comp = sub.add_parser("compile", aliases=["c", "myna2py", "myna2js"], help="Compile Myna (.myna) to Python (.py) or JavaScript (.js)")
+    p_comp = sub.add_parser("compile", aliases=["c", "myna2py", "myna2js"], help="Compile Myna (.myna) to Python (.py), JavaScript (.js), or TypeScript (.ts)")
     p_comp.add_argument("input", help="Input .myna file (or '-' for stdin)")
-    p_comp.add_argument("-o", "--output", help="Output .py or .js file (default: stdout)")
-    p_comp.add_argument("-t", "--target", choices=["py", "js"], default=None, help="Target language: 'py' (default) or 'js'")
+    p_comp.add_argument("-o", "--output", help="Output .py, .js, or .ts file (default: stdout)")
+    p_comp.add_argument("-t", "--target", choices=["py", "js", "ts"], default=None, help="Target language: 'py' (default), 'js', or 'ts'")
     p_comp.set_defaults(func=cmd_compile)
 
     p_dec = sub.add_parser("decompile", aliases=["d", "py2myna"], help="Compress Python (.py) to Myna (.myna)")
@@ -335,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_run = sub.add_parser("run", aliases=["r"], help="Compile and execute a .myna file directly (via Python or Node.js)")
     p_run.add_argument("input", help="Input .myna file to run")
-    p_run.add_argument("-t", "--target", choices=["py", "js"], default="py", help="Runtime target: 'py' (default) or 'js' (Node.js)")
+    p_run.add_argument("-t", "--target", choices=["py", "js", "ts"], default="py", help="Runtime target: 'py' (default) or 'js' (Node.js); 'ts' is compile-only")
     p_run.add_argument(
         "--module-root",
         metavar="DIR",

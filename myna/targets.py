@@ -11,11 +11,21 @@ class TargetError(Exception):
     """Raised when a module is compiled for a target it does not support."""
 
 
-def enforce_module_target(mod: ast.Module, target: str) -> None:
-    """Reject targets excluded by a module-level `@target(...)` declaration."""
-    if mod.targets is not None and target not in mod.targets:
-        declared = ", ".join(sorted(mod.targets))
-        raise TargetError(f"module declares @target({declared}); target '{target}' is not supported")
+def enforce_module_target(
+    mod: ast.Module, target: str, *, label: str | None = None
+) -> None:
+    """Reject targets excluded by a module-level `@target(...)` declaration.
+
+    ``label`` is the user-facing target name when one backend serves more than one
+    output format (the TypeScript target uses the ``js`` contract but reports ``ts``).
+    """
+    declared_targets = mod.targets if mod.targets is not None else {"py"}
+    if target not in declared_targets:
+        declared = ", ".join(sorted(declared_targets))
+        shown = label or target
+        raise TargetError(
+            f"module declares @target({declared}); target '{shown}' is not supported"
+        )
 
 
 def expand_target_blocks(mod: ast.Module, target: str) -> ast.Module:

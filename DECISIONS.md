@@ -99,7 +99,7 @@ Python remains the primary target: everything documented must work there.
 
 ## D-003 — `@target` defaults to Python only
 
-**Status:** Accepted — 2026-10-26; deferred to 0.6.0 (2026-10-28)
+**Status:** Accepted — 2026-10-26; implemented in 0.6.0 (2026-10-29)
 
 ### Context
 
@@ -184,4 +184,73 @@ cycles follow Node's ESM semantics, not Python's partially-initialized modules.
   `VERSIONING.md` §6.
 - This is a new target capability, so it is a minor, not a patch (`VERSIONING.md` §2),
   and the README/SPEC Portable Core text no longer lists relative imports as rejected.
+
+---
+
+## D-006 — TypeScript is a typed projection of the JavaScript target
+
+**Status:** Accepted — 2026-10-28
+**Supersedes:** none
+
+### Context
+
+TypeScript is a superset of JavaScript: its types are erased before execution, and it
+does not provide new runtime capabilities. Myna already has a bounded JavaScript target
+(D-001, D-002, D-005) whose Python-semantics helpers and `TargetError` boundary are
+tested by execution. Downstream TypeScript tools and frameworks want typed modules,
+but making TypeScript a third semantic target would duplicate a contract with no
+runtime difference and create ambiguity between `@target(js)` and `@target(ts)` blocks.
+
+### Decision
+
+TypeScript is an **output dialect** of the JavaScript target, not a third target:
+
+- `myna compile -t ts` emits `.ts` (or `.mts`) modules using the same inlined
+  `__myna_*` helpers, the same Portable Core, the same `TargetError` boundary, and the
+  same `@target(py, js)` contract. `@target(js)` blocks are emitted for `-t ts`.
+- `VALID_TARGETS` stays `py`/`js`; there is no `@target(ts)`. `myna targets` reports
+  `ts` as a derived, generation-only target.
+- Type annotations are **advisory and erased**. Unannotated parameters are emitted as
+  explicit `any`; a module whose annotations are truthful passes `tsc --strict`. No
+  runtime checks are added, and `i`/`f` both map to `number`.
+- `$= Alias = Type` becomes `export type Alias = Type`; a relative import of an alias
+  becomes `import type`; using a type alias as a value is a `TargetError` for `-t ts`.
+- Relative-import specifiers are `.js`/`.mjs` (the files `tsc` emits), independent of
+  the `.ts`/`.mts` output extension. NodeNext, `"type": "module"` or `.mts`, and
+  `@types/node` are documented requirements for direct Node execution.
+- The target is compile-only: `myna run -t ts` is rejected with an instruction to use
+  `-t js`, which executes the same program.
+- Class and type-alias names that TypeScript reserves for primitives (`string`,
+  `number`, `any`, `unknown`, `never`, `void`, `object`, `symbol`, `bigint`, `null`,
+  `undefined`) are rejected with `TargetError`; they cannot be renamed consistently
+  because annotations such as `x: string` must keep meaning the primitive.
+
+### Consequences
+
+- `myna/backends/ts_gen.py` subclasses `JSGenerator` and reuses the JavaScript helper
+  bodies with an annotated overlay. Helper bodies stay single-sourced; a change to a
+  JavaScript helper surfaces as a TypeScript typecheck failure in the test suite.
+- Python `typing`/`collections.abc` annotations are translated (`Callable`, `Mapping`,
+  `Sequence`, `Iterator`, `Awaitable`, `Generator`, `Type`, `Self`, and their relatives)
+  rather than emitted verbatim. Myna has no generic declarations, so type arguments on a
+  user class or alias are erased (`Box[int]` → `Box`); unknown `typing.*` names become
+  `any` instead of a dangling identifier. The helper typecheck test compiles every
+  helper, not only the helpers a particular corpus uses.
+- The test suite compiles the JavaScript cross-target corpus with `tsc --strict`,
+  transpiles it, and executes it with Node, in addition to type-mapping and interop
+  tests. The TypeScript compiler and `@types/node` are dev-only tools in
+  `tests/ts/package.json`; the package keeps zero runtime dependencies.
+- The JavaScript runtime floor (Node 20.11+) is unchanged. The TypeScript target is
+  Node-first; browser/DOM output is not a supported contract.
+- The README, `SPEC.md`, and `skills/myna/SKILL.md` document TypeScript as a typed
+  projection and must not imply that `tsc` errors make `myna compile` fail.
+
+### Open questions
+
+- Class/method decorators and JSX/TSX, which frameworks such as NestJS, Angular, and
+  React use, remain out of scope.
+- Whether a TS-only construct would justify `@target(ts)` or a separate target in a
+  future minor.
+- Whether generated `.d.ts` sidecars or type inference for Myna become worthwhile.
+- Browser-oriented output would need a different `@main` guard and DOM type story.
 

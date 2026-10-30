@@ -26,7 +26,15 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         finally:
             Path(js_path).unlink(missing_ok=True)
 
+    def portable_source(self, myna_src: str) -> str:
+        """Make the cross-target corpus's portability explicit (D-003)."""
+        first = myna_src.lstrip().splitlines()[0].strip() if myna_src.strip() else ""
+        if first.startswith("@target(") and "{" not in first:
+            return myna_src
+        return "@target(py, js)\n" + myna_src
+
     def run_both_targets(self, myna_src: str) -> tuple[str, str]:
+        myna_src = self.portable_source(myna_src)
         py_code = myna_to_python(myna_src)
         js_code = myna_to_js(myna_src)
         self.check_js_syntax(js_code)
@@ -437,6 +445,17 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
             ),
         )
 
+    def test_cross_target_empty_builtin_constructors(self):
+        src = """
+        @main {
+            p(@list())
+            p(@set())
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "[]\nset()")
+
     def test_cross_target_helper_dependencies(self):
         # `in` needs `eq`, `*` needs `add`; using either alone must still emit its deps.
         src = """
@@ -476,6 +495,78 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         py_out, js_out = self.run_both_targets(src)
         self.assertEqual(py_out, js_out)
         self.assertEqual(js_out, "3\n2\n0\n0")
+
+    def test_cross_target_with_binding_survives_the_block(self):
+        # Python's `with` has no scope; the JS/TS projection must keep the
+        # `as` binding visible after the closing brace too.
+        src = """
+        $C {
+            value:s = "ctx"
+            @__enter__()->A { ^ C() }
+            @__exit__(*a:A) { _ }
+            @close() { _ }
+        }
+        @main {
+            !& c = C() { p("in") }
+            p(c.value)
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "in\nctx")
+
+    def test_cross_target_dataclass_inheritance(self):
+        src = """
+        $$Base(id:i) {
+            @show()->i => .id
+        }
+        $$Child(id:i, name:s) < Base {
+            @label()->s => `{.id}:{.name}`
+        }
+        $$Named(name:s) < Base {
+            @name2()->s => .name
+        }
+        @main {
+            c = Child(3, "a")
+            p(c.show())
+            p(c.label())
+            p(c.id)
+            n = Named(5, "b")
+            p(n.id)
+            p(n.name2())
+        }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "3\n3:a\n3\n5\nb")
+
+    def test_nested_classes_are_rejected(self):
+        with self.assertRaises(TargetError):
+            myna_to_js("@target(py, js)\n$Outer { $Inner { _ } }\n")
+
+    def test_derived_init_must_call_super(self):
+        src = (
+            "@target(py, js)\n"
+            "$Base { @init(x:i) { .x = x } }\n"
+            "$Child < Base { @init(x:i) { .x = x } }\n"
+        )
+        with self.assertRaises(TargetError):
+            myna_to_js(src)
+
+    def test_cross_target_derived_init_with_super(self):
+        src = """
+        $Base {
+            @init(x:i) { .x = x }
+            @value()->i => .x
+        }
+        $Child < Base {
+            @init(x:i) { ..init(x) }
+        }
+        @main { p(Child(4).value()) }
+        """
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(js_out, "4")
 
     def test_cross_target_range_steps(self):
         src = """

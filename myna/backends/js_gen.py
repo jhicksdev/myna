@@ -4,9 +4,15 @@ Myna semantics are Python semantics (see ``DECISIONS.md`` D-001).  JavaScript is
 bounded target: constructs that can be emulated exactly use the inlined ``__myna_*``
 helpers below, and constructs that cannot are rejected with ``TargetError`` instead of
 being approximated.
+
+``backends/ts_gen.py`` subclasses :class:`JSGenerator` and reuses these helper bodies
+with erased type annotations (D-006).  The small hooks below (``return_annotation``,
+``catch_clause``, ``builtin_value``, ``lambda_param``, ``function_fallthrough``, and
+``export_lines``) exist so the TypeScript target does not need a copy of the generator.
 """
 
 from __future__ import annotations
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -488,6 +494,7 @@ class JSGenerator:
         self.exception_shims: set[str] = set()
         self.loop_stack: list[Optional[str]] = []
         self.loop_counter = 0
+        self.with_counter = 0
         self.exc_var_stack: list[str] = []
         # Relative-import resolution (`<.util:{f}` -> "./util.js").
         self.source_path = Path(source_path) if source_path is not None else None
@@ -495,9 +502,36 @@ class JSGenerator:
         self.import_base = Path(import_base) if import_base is not None else None
         self.dependencies: set[Path] = set()
         self.inline_exports: set[str] = set()
+        # Dataclass fields, including inherited fields, keyed by class name.  The
+        # constructor of a dataclass subclass must pass the base's fields to
+        # `super(...)` before touching `this`.
+        self.class_defs: dict[str, ast.ClassDef] = {}
+        self.dataclass_fields: dict[str, list[ast.Param]] = {}
 
     def ind(self) -> str:
         return self.indent_str * self.indent_level
+
+    # Subclass hooks.  The JavaScript target emits none of these; the TypeScript
+    # backend uses them to add erased type syntax without duplicating the generator.
+    def return_annotation(self, fn: ast.FuncDef) -> str:
+        """Return a `: T` annotation for a function header, or the empty string."""
+        return ""
+
+    def catch_clause(self, evar: str) -> str:
+        """Return the `catch (...)` clause header for a bound exception variable."""
+        return f"catch ({evar})"
+
+    def function_fallthrough(self, fn: ast.FuncDef) -> list[str]:
+        """Lines emitted at the end of a function body, before the closing brace."""
+        return []
+
+    def builtin_value(self, name: str) -> Optional[str]:
+        """Return the JavaScript expression for a first-class builtin alias."""
+        return BUILTIN_VALUES.get(name)
+
+    def lambda_param(self, name: str) -> str:
+        """Render an internal lambda parameter (the TypeScript target annotates it)."""
+        return name
 
     def push_scope(self, initial: Optional[set[str]] = None) -> None:
         self.scopes.append(set(initial or set()))
@@ -568,28 +602,124 @@ class JSGenerator:
         for stmt in mod.body:
             lines.extend(self.gen_stmt(stmt))
 
-        # ES modules do not leak bindings: every top-level Python name that another
-        # module can import must be exported. Names already exported inline by `+@`
-        # are skipped so a module never declares the same export twice.
-        export_names = [n for n in module_bindings(mod) if n not in self.inline_exports]
-        if export_names:
-            specs = []
-            for name in export_names:
-                bound = js_ident(name)
-                specs.append(bound if bound == name else f"{bound} as {name}")
-            lines.append(f"export {{ {', '.join(specs)} }};")
+        lines.extend(self.export_lines(mod))
 
         helpers = self._helper_lines()
         all_lines = (helpers + [""] + lines) if (helpers and lines) else (helpers + lines)
         return "\n".join(all_lines).rstrip() + "\n"
+
+    def export_lines(self, mod: ast.Module) -> list[str]:
+        """Emit the trailing export list for every importable top-level binding.
+
+        ES modules do not leak bindings: every top-level Python name that another
+        module can import must be exported. Names already exported inline by `+@`
+        are skipped so a module never declares the same export twice.
+        """
+        export_names = [n for n in module_bindings(mod) if n not in self.inline_exports]
+        if not export_names:
+            return []
+        specs = []
+        for name in export_names:
+            bound = js_ident(name)
+            specs.append(bound if bound == name else f"{bound} as {name}")
+        return [f"export {{ {', '.join(specs)} }};"]
 
     def _scan_classes(self, mod: ast.Module) -> None:
         for stmt in mod.body:
             if isinstance(stmt, ast.ClassDef):
                 self.known_classes.add(stmt.name)
                 self.declare(stmt.name)
+                self.class_defs[stmt.name] = stmt
             elif isinstance(stmt, ast.FuncDef):
                 self.declare(stmt.name)
+        for name in self.class_defs:
+            if name not in self.dataclass_fields:
+                self.dataclass_fields[name] = self._effective_dataclass_fields(
+                    self.class_defs[name], set()
+                )
+
+    def _iter_nodes(self, node: ast.Node):
+        """Yield ``node`` and every AST node reachable below it."""
+        yield node
+        if not dataclasses.is_dataclass(node):
+            return
+        for field in dataclasses.fields(node):
+            value = getattr(node, field.name)
+            if isinstance(value, ast.Node):
+                yield from self._iter_nodes(value)
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, ast.Node):
+                        yield from self._iter_nodes(item)
+
+    def _calls_super_init(self, fn: ast.FuncDef) -> bool:
+        return any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.SuperAttr)
+            and node.func.attr == "init"
+            for node in self._iter_nodes(fn)
+        )
+
+    def _effective_dataclass_fields(
+        self, cls: ast.ClassDef, seen: set[str]
+    ) -> list[ast.Param]:
+        """Return a dataclass's constructor fields, base fields first."""
+        own = list(cls.fields or [])
+        if not cls.is_dataclass or not cls.bases:
+            return own
+        base = cls.bases[0]
+        if not isinstance(base, ast.Ident) or base.name in seen:
+            return own
+        base_cls = self.class_defs.get(base.name)
+        if base_cls is None or not base_cls.is_dataclass:
+            return own
+        if base.name not in self.dataclass_fields:
+            self.dataclass_fields[base.name] = self._effective_dataclass_fields(
+                base_cls, seen | {base.name}
+            )
+        base_fields = self.dataclass_fields[base.name]
+        by_name = {field.name: field for field in own}
+        base_names = {field.name for field in base_fields}
+        merged = [by_name.get(field.name, field) for field in base_fields]
+        merged.extend(field for field in own if field.name not in base_names)
+        return merged
+
+    def _dataclass_constructor_plan(
+        self, cls: ast.ClassDef
+    ) -> tuple[list[ast.Param], list[str], list[ast.Param]]:
+        """Return constructor params, `super(...)` arguments, and own assignments."""
+        own = list(cls.fields or [])
+        if not cls.bases:
+            return own, [], own
+        base = cls.bases[0]
+        if not isinstance(base, ast.Ident):
+            raise TargetError(
+                f"class '{cls.name}': dataclass inheritance requires a named base "
+                "class"
+            )
+        base_cls = self.class_defs.get(base.name)
+        if base_cls is None:
+            raise TargetError(
+                f"class '{cls.name}': dataclass inheritance requires the base class "
+                "to be defined in the same module"
+            )
+        if not base_cls.is_dataclass:
+            if any(
+                isinstance(stmt, ast.FuncDef) and stmt.method_kind == "init"
+                for stmt in base_cls.body
+            ):
+                raise TargetError(
+                    f"class '{cls.name}': cannot derive a dataclass from "
+                    f"'{base.name}' because its @init is not a dataclass constructor"
+                )
+            return own, [], own
+
+        base_fields = self.dataclass_fields.get(base.name, [])
+        params = self.dataclass_fields.get(cls.name, own)
+        base_names = {field.name for field in base_fields}
+        assignments = [field for field in own if field.name not in base_names]
+        super_args = [js_ident(field.name) for field in base_fields]
+        return params, super_args, assignments
 
     # ========================================================================
     # Relative imports
@@ -862,6 +992,15 @@ class JSGenerator:
             return f"[{', '.join(parts)}]"
         return self._gen_lvalue(expr)
 
+    def _binding_names(self, expr: ast.Expr):
+        """Yield the local names bound by an assignment or `with` target."""
+        if isinstance(expr, ast.Ident):
+            if expr.name != "_":
+                yield expr.name
+        elif isinstance(expr, (ast.TupleExpr, ast.ListExpr)):
+            for element in expr.elts:
+                yield from self._binding_names(element)
+
     def gen_block(self, stmts: list[ast.Stmt], new_scope: bool = True) -> list[str]:
         if new_scope:
             self.push_scope()
@@ -876,8 +1015,16 @@ class JSGenerator:
 
     def gen_func_def(self, fn: ast.FuncDef) -> list[str]:
         self.declare(fn.name)
-        export_prefix = "export " if (fn.exported and self.indent_level == 0) else ""
-        if export_prefix:
+        # A renamed binding (JS reserved word) is exported by the trailing export
+        # list, which can alias it back to the source name; `export function $name`
+        # would make the source name unimportable.
+        inline_export = (
+            fn.exported
+            and self.indent_level == 0
+            and js_ident(fn.name) == fn.name
+        )
+        export_prefix = "export " if inline_export else ""
+        if inline_export:
             self.inline_exports.add(fn.name)
         async_prefix = "async " if fn.is_async else ""
         star_suffix = "*" if fn.is_generator else ""
@@ -894,23 +1041,25 @@ class JSGenerator:
         self.push_scope(param_names)
         self.loop_stack.append(None)
         lines: list[str] = []
+        ret_ann = self.return_annotation(fn)
 
         if self.in_class:
             if fn.method_kind == "init":
                 header = f"{self.ind()}constructor({', '.join(param_strs)}) {{"
             elif fn.method_kind in ("static", "classmethod"):
-                header = f"{self.ind()}static {async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}) {{"
+                header = f"{self.ind()}static {async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}){ret_ann} {{"
             elif fn.method_kind == "property":
-                header = f"{self.ind()}get {fn.name}() {{"
+                header = f"{self.ind()}get {fn.name}(){ret_ann} {{"
             elif fn.method_kind == "setter":
                 header = f"{self.ind()}set {fn.name}({', '.join(param_strs)}) {{"
             else:
-                header = f"{self.ind()}{async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}) {{"
+                header = f"{self.ind()}{async_prefix}{star_suffix}{fn.name}({', '.join(param_strs)}){ret_ann} {{"
         else:
-            header = f"{self.ind()}{export_prefix}{async_prefix}function{star_suffix} {js_ident(fn.name)}({', '.join(param_strs)}) {{"
+            header = f"{self.ind()}{export_prefix}{async_prefix}function{star_suffix} {js_ident(fn.name)}({', '.join(param_strs)}){ret_ann} {{"
 
         lines.append(header)
         lines.extend(self.gen_block(fn.body, new_scope=False))
+        lines.extend(self.function_fallthrough(fn))
         lines.append(f"{self.ind()}}}")
 
         # Apply decorators if present outside class
@@ -942,8 +1091,13 @@ class JSGenerator:
 
         self.declare(cls.name)
         self.known_classes.add(cls.name)
-        export_prefix = "export " if (cls.exported and self.indent_level == 0) else ""
-        if export_prefix:
+        inline_export = (
+            cls.exported
+            and self.indent_level == 0
+            and js_ident(cls.name) == cls.name
+        )
+        export_prefix = "export " if inline_export else ""
+        if inline_export:
             self.inline_exports.add(cls.name)
         ext_part = ""
         if cls.bases:
@@ -951,6 +1105,29 @@ class JSGenerator:
             if isinstance(base, ast.Ident) and base.name in PY_EXCEPTIONS:
                 self.use_exception(base.name)
             ext_part = f" extends {self.gen_expr(base)}"
+
+        # Validate the dataclass base before emitting anything, even when the
+        # subclass adds no fields of its own (its default constructor would still
+        # need to call a usable base constructor).
+        plan = (
+            self._dataclass_constructor_plan(cls)
+            if cls.is_dataclass and cls.bases
+            else None
+        )
+        if cls.bases and not cls.is_dataclass:
+            init = next(
+                (
+                    stmt
+                    for stmt in cls.body
+                    if isinstance(stmt, ast.FuncDef) and stmt.method_kind == "init"
+                ),
+                None,
+            )
+            if init is not None and not self._calls_super_init(init):
+                raise TargetError(
+                    f"class '{cls.name}': a derived class with @init must call "
+                    "the base constructor with ..init(...)"
+                )
 
         lines = [f"{self.ind()}{export_prefix}class {js_ident(cls.name)}{ext_part} {{"]
         prev_in_class = self.in_class
@@ -960,10 +1137,13 @@ class JSGenerator:
 
         # If dataclass `$$C(id:i, name:s="a")`, auto-generate constructor!
         if cls.is_dataclass and cls.fields:
-            p_strs = [self.gen_param(f) for f in cls.fields]
+            params, super_args, assignments = plan or (cls.fields, [], cls.fields)
+            p_strs = [self.gen_param(f) for f in params]
             lines.append(f"{self.ind()}constructor({', '.join(p_strs)}) {{")
             self.indent_level += 1
-            for f in cls.fields:
+            if cls.bases:
+                lines.append(f"{self.ind()}super({', '.join(super_args)});")
+            for f in assignments:
                 lines.append(f"{self.ind()}this.{f.name} = {js_ident(f.name)};")
             self.indent_level -= 1
             lines.append(f"{self.ind()}}}")
@@ -983,7 +1163,12 @@ class JSGenerator:
                         )
                     lines.append(f"{self.ind()}{target.name} = {self.gen_expr(s.value)};")
                 continue
-            if isinstance(s, (ast.FuncDef, ast.ClassDef, ast.NoopStmt)):
+            if isinstance(s, ast.ClassDef):
+                raise TargetError(
+                    f"class '{cls.name}': nested classes are not supported by the "
+                    "JavaScript target"
+                )
+            if isinstance(s, (ast.FuncDef, ast.NoopStmt)):
                 lines.extend(self.gen_stmt(s))
                 continue
             raise TargetError(
@@ -1167,7 +1352,7 @@ class JSGenerator:
 
         if stmt.handlers:
             evar = "__myna_exc"
-            lines.append(f"{ind}}} catch ({evar}) {{")
+            lines.append(f"{ind}}} {self.catch_clause(evar)} {{")
             self.indent_level += 1
             if has_else:
                 lines.append(f"{self.ind()}__myna_ok = false;")
@@ -1222,26 +1407,44 @@ class JSGenerator:
         return lines
 
     def gen_with_stmt(self, stmt: ast.WithStmt) -> list[str]:
-        lines = [f"{self.ind()}{{"]
-        self.indent_level += 1
+        lines: list[str] = []
+        # Python's `with` does not introduce a scope, so a name bound by `as`
+        # remains visible afterwards.  Declare those names before the `try`; the
+        # internal `__ctx_*` handles get a statement-unique prefix.
+        for item in stmt.items:
+            if item.optional_vars is None:
+                continue
+            for name in self._binding_names(item.optional_vars):
+                if not self.is_declared(name):
+                    lines.append(f"{self.ind()}let {js_ident(name)};")
+                    self.declare(name)
+
+        # The context handle needs a name that is unique across sibling `with`
+        # statements; the statement itself must not add a JS block because Python's
+        # `with` does not scope assignments made in its body.
+        self.with_counter += 1
+        prefix = f"__ctx_{self.with_counter}"
         self.push_scope()
         for idx, item in enumerate(stmt.items):
-            var_s = self.gen_expr(item.optional_vars) if item.optional_vars is not None else f"__ctx_{idx}"
-            if item.optional_vars is not None and isinstance(item.optional_vars, ast.Ident):
-                self.declare(item.optional_vars.name)
-            lines.append(f"{self.ind()}const {var_s} = {self.gen_expr(item.context_expr)};")
+            lines.append(
+                f"{self.ind()}const {prefix}_{idx} = "
+                f"{self.gen_expr(item.context_expr)};"
+            )
+            if item.optional_vars is not None and not (
+                isinstance(item.optional_vars, ast.Ident)
+                and item.optional_vars.name == "_"
+            ):
+                target = self._gen_destructure_target(item.optional_vars)
+                lines.append(f"{self.ind()}{target} = {prefix}_{idx};")
         lines.append(f"{self.ind()}try {{")
         lines.extend(self.gen_block(stmt.body, new_scope=False))
         lines.append(f"{self.ind()}}} finally {{")
         self.indent_level += 1
-        for idx, item in enumerate(stmt.items):
-            var_s = self.gen_expr(item.optional_vars) if item.optional_vars is not None else f"__ctx_{idx}"
-            lines.append(f"{self.ind()}{var_s}?.close?.();")
+        for idx, _ in enumerate(stmt.items):
+            lines.append(f"{self.ind()}{prefix}_{idx}?.close?.();")
         self.indent_level -= 1
         lines.append(f"{self.ind()}}}")
         self.pop_scope()
-        self.indent_level -= 1
-        lines.append(f"{self.ind()}}}")
         return lines
 
     # ========================================================================
@@ -1467,7 +1670,7 @@ class JSGenerator:
             self.use_helper("print")
             return "__myna_print"
         if name.startswith("@"):
-            value = BUILTIN_VALUES.get(name)
+            value = self.builtin_value(name)
             if value is None:
                 raise TargetError(
                     f"builtin '{name}' is not supported by the JavaScript target"
@@ -1502,7 +1705,7 @@ class JSGenerator:
             body = f"__myna_truthy(__v) ? __v : {right}"
         else:
             body = f"__myna_truthy(__v) ? {right} : __v"
-        return f"((__v) => {body})({left})"
+        return f"(({self.lambda_param('__v')}) => {body})({left})"
 
     def _js_isinstance(self, subject: str, expr: ast.Expr) -> str:
         if isinstance(expr, ast.Ident):
@@ -1523,7 +1726,7 @@ class JSGenerator:
             # `(A, B)` in a runtime check is a union; bind the subject once so it is
             # not evaluated repeatedly inside the `||` chain.
             inner = " || ".join(self._js_isinstance("__v", e) for e in expr.elts) or "false"
-            return f"((__v) => {inner})({subject})"
+            return f"(({self.lambda_param('__v')}) => {inner})({subject})"
         # Compound type expressions check their runtime origin type.
         if isinstance(expr, ast.ListExpr):
             return f"Array.isArray({subject})"
@@ -1562,6 +1765,12 @@ class JSGenerator:
                             f"unsupported keyword '{k}' for '@srt' on the JavaScript target"
                         )
                 return f"__myna_sort({arr_s}, {key_s}, {reverse_s})"
+
+            if fn == "@set" and not call.args and not call.keywords:
+                return "new Set()"
+
+            if fn in ("@list", "@tuple") and not call.args and not call.keywords:
+                return "[]"
 
             if fn == "@set" and len(call.args) == 1 and not call.keywords:
                 return f"new Set({self.gen_expr(call.args[0])})"

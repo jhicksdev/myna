@@ -10,11 +10,11 @@ its parent directory for both plain modules and ``__init__.myna`` packages::
 The module *root* only overrides this for a program's entry file, so ``tests/run.myna``
 with ``--module-root .`` can reach a sibling ``src/`` tree (see ``GAPS.md`` G3).
 
-This module is shared by the JavaScript backend (which turns a relative import into a
-relative ES module specifier and needs to know whether a package's symbol comes from its
-``__init__`` or a submodule) and ``myna run -t js``. The Python loader and ``myna bundle``
-resolve imports through the same conventions but keep their own import-machinery
-integration.
+This module is shared by the JavaScript and TypeScript backends (which turn a relative
+import into a relative ES module specifier and need to know whether a package's symbol
+comes from its ``__init__`` or a submodule, and whether it is a type alias) and
+``myna run -t js``. The Python loader and ``myna bundle`` resolve imports through the
+same conventions but keep their own import-machinery integration.
 """
 
 from __future__ import annotations
@@ -227,6 +227,23 @@ def module_classes(path: Path) -> frozenset[str]:
     expanded = expand_target_blocks(tree, "js")
     return frozenset(
         stmt.name for stmt in expanded.body if isinstance(stmt, ast.ClassDef)
+    )
+
+
+@lru_cache(maxsize=None)
+def module_type_aliases(path: Path) -> frozenset[str]:
+    """Type alias names a module defines at top level for the TypeScript target.
+
+    The TypeScript backend needs this to emit ``import type`` for a name that has no
+    runtime binding.  Target blocks are expanded with the ``js`` contract because
+    TypeScript is a typed projection of the JavaScript target.
+    """
+    from myna.targets import expand_target_blocks
+
+    tree = _parse_file(Path(path))
+    expanded = expand_target_blocks(tree, "js")
+    return frozenset(
+        stmt.name for stmt in expanded.body if isinstance(stmt, ast.TypeAliasStmt)
     )
 
 

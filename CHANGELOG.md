@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+## 0.6.0 (2026-10-29)
+
+### Added
+
+- TypeScript: `myna compile -t ts` (and `myna_to_ts`) emits typed `.ts`/`.mts` modules.
+  TypeScript is a typed projection of the JavaScript target: it uses the same runtime
+  helpers, Portable Core, `@target(py, js)` contract, `@target(js)` blocks, and
+  `TargetError`s. `$=` becomes `export type`, a relative import of an alias becomes
+  `import type`, and annotations are erased. Unannotated parameters are explicit `any`;
+  truthful annotations pass `tsc --strict`. `myna run -t ts` is compile-only in this
+  release. See `DECISIONS.md` D-006 and the README TypeScript section.
+- `myna targets` reports `ts` alongside `py`/`js`; an output extension of `.ts`/`.mts`
+  selects the target when `-t` is omitted.
+- `myna_to_ts()` / `compile_to_ts()` are exported from `myna`; a new
+  `myna.modules.module_type_aliases()` lets the generator emit type-only imports.
+
+### Changed
+
+- **Breaking:** a module with no `@target(...)` declaration now defaults to
+  `@target(py)` instead of implicit `@target(py, js)`. Portability is opt-in. Add
+  `@target(py, js)` to any module that must compile for JavaScript or TypeScript. This
+  completes the deprecation announced in 0.5.0 (`DECISIONS.md` D-003); there is no
+  syntax change, only one declaration per portable module.
+
+### Fixed
+
+- JavaScript/TypeScript: `+@`/`+$` declarations whose names are JavaScript reserved
+  words (for example `+@default`) are exported under the source name instead of an
+  unimportable `$`-prefixed binding.
+- TypeScript: Python `typing`/`collections.abc` annotations now generate valid types.
+  `Callable`, `Mapping`, `Sequence`, `Iterator`, `Awaitable`, `Generator`, `Type`, and
+  `Self` map to their TypeScript equivalents; `ClassVar`/`Final`/`Annotated` erase to
+  their inner type; unknown `typing.*` names become `any`. Type arguments on user
+  classes and aliases are erased because Myna has no generic declarations.
+- TypeScript: a `**kwargs` parameter is optional (`= {} as any`), so calls without
+  keyword arguments type-check.
+- JavaScript/TypeScript: a `with ... as name` binding remains visible after the
+  statement. The context object is closed instead of the bound value, and sibling
+  `with` statements no longer share a context-handle name.
+- JavaScript/TypeScript: dataclass subclasses now call `super(...)` with the base
+  dataclass's fields, producing valid classes in both targets. Nested classes and
+  dataclass inheritance from a class with a custom `@init` are rejected with
+  `TargetError` instead of emitting invalid code.
+
+### Documentation
+
+- Document the TypeScript target, its type mapping, `tsconfig` requirements, and limits
+  in `SPEC.md`, `README.md`, and `skills/myna/SKILL.md`.
+
 ## 0.5.0 (2026-10-28)
 
 ### Added

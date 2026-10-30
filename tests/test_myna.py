@@ -18,6 +18,7 @@ from myna import (
     TargetError,
     myna_to_js,
     myna_to_python,
+    myna_to_ts,
     python_to_myna,
 )
 
@@ -427,6 +428,12 @@ class TestMynaTranspiler(unittest.TestCase):
         with self.assertRaises(TargetError):
             myna_to_js(py_only)
 
+        # D-003: no declaration means Python-only; portability is opt-in.
+        implicit = "value=1\n"
+        self.assertIn("value = 1", myna_to_python(implicit))
+        with self.assertRaises(TargetError):
+            myna_to_js(implicit)
+
         portable = '@target(py, js)\n"""doc"""\nvalue=1\n'
         self.assertIn("value = 1", myna_to_python(portable))
         self.assertIn("let value = 1;", myna_to_js(portable))
@@ -446,6 +453,10 @@ class TestMynaTranspiler(unittest.TestCase):
         ns = self.exec_myna(src)
         self.assertEqual(ns["platform"](), "py:3.14")
         self.assertNotIn("only_js", ns)
+
+        # A target block does not opt the module into portability (D-003).
+        with self.assertRaises(TargetError):
+            myna_to_js(src)
 
     def test_target_syntax_errors(self):
         invalid = [
@@ -525,11 +536,11 @@ class TestMynaTranspiler(unittest.TestCase):
         for label, src in cases.items():
             with self.subTest(construct=label):
                 with self.assertRaises(TargetError):
-                    myna_to_js(src)
+                    myna_to_js("@target(py, js)\n" + src)
 
     def test_js_relative_imports_require_a_source_path(self):
         with self.assertRaises(TargetError) as caught:
-            myna_to_js("<.util:{f}\n")
+            myna_to_js("@target(py, js)\n<.util:{f}\n")
         self.assertIn("source path", str(caught.exception))
 
     def test_try_requires_handler_or_finally(self):
@@ -559,6 +570,8 @@ class TestMynaTranspiler(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source = pathlib.Path(tmp) / "py_only.myna"
             source.write_text("@target(py)\n<math\nvalue=math.pi\n", encoding="utf-8")
+            implicit = pathlib.Path(tmp) / "implicit.myna"
+            implicit.write_text("value=1\n", encoding="utf-8")
             cwd = pathlib.Path(__file__).resolve().parents[1]
             report = subprocess.run(
                 [sys.executable, "-m", "myna", "targets", str(source)],
@@ -572,11 +585,67 @@ class TestMynaTranspiler(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            implicit_report = subprocess.run(
+                [sys.executable, "-m", "myna", "targets", str(implicit)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
         self.assertEqual(report.returncode, 0)
         self.assertIn("Declared : py", report.stdout)
         self.assertIn("js       : unsupported", report.stdout)
         self.assertEqual(compile_js.returncode, 1)
         self.assertIn("module declares @target(py)", compile_js.stderr)
+        self.assertEqual(implicit_report.returncode, 0)
+        self.assertIn("Declared : py", implicit_report.stdout)
+        self.assertIn("js       : unsupported", implicit_report.stdout)
+
+    def test_typescript_api_and_cli(self):
+        src = "@target(py, js)\n@double(x:i)->i => x * 2\n"
+        self.assertIn("function double(x: number): number", myna_to_ts(src))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = pathlib.Path(tmp) / "portable.myna"
+            source.write_text(src, encoding="utf-8")
+            out = pathlib.Path(tmp) / "portable.ts"
+            cwd = pathlib.Path(__file__).resolve().parents[1]
+
+            compiled = subprocess.run(
+                [sys.executable, "-m", "myna", "compile", str(source), "-o", str(out)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            self.assertIn("function double(x: number): number", out.read_text())
+
+            report = subprocess.run(
+                [sys.executable, "-m", "myna", "targets", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(report.returncode, 0, report.stderr)
+            self.assertIn("ts       : supported", report.stdout)
+
+            run = subprocess.run(
+                [sys.executable, "-m", "myna", "run", "-t", "ts", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("compile-only", run.stderr)
+
+            source.write_text("@target(py)\nvalue = 1\n", encoding="utf-8")
+            rejected = subprocess.run(
+                [sys.executable, "-m", "myna", "compile", "-t", "ts", str(source)],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(rejected.returncode, 1)
+            self.assertIn("target 'ts'", rejected.stderr)
 
     def test_run_resolves_relative_myna_modules(self):
         with tempfile.TemporaryDirectory() as tmp:
