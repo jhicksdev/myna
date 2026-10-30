@@ -109,6 +109,30 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["b_str"], "[.role] Carol")
         self.assertEqual(ns["ver"], 1)
 
+    def test_mutable_dataclass_defaults_get_a_factory(self):
+        """`$$D(xs:[s]=[])` must load and give each instance its own list (GAPS.md G6)."""
+        src = """
+        $$D(xs:[s]=[], tags:{s:i}={}, names:{s}={"n"}, fixed:[i]=[1, 2])
+        a = D()
+        a.xs.append("x")
+        a.tags$k = 1
+        a.names.add("n")
+        b = D()
+        """
+        py_code = myna_to_python(src)
+        self.assertIn("field(default_factory=list)", py_code)
+        self.assertIn("field(default_factory=dict)", py_code)
+        self.assertIn("field(default_factory=lambda: {'n'})", py_code)
+        ns: dict = {}
+        exec(py_code, ns)
+        self.assertEqual(ns["a"].xs, ["x"])
+        self.assertEqual(ns["b"].xs, [])
+        self.assertEqual(ns["b"].tags, {})
+        self.assertEqual(ns["b"].names, {"n"})
+        self.assertIsNot(ns["a"].names, ns["b"].names)
+        self.assertEqual(ns["a"].fixed, [1, 2])
+        self.assertEqual(ns["b"].fixed, [1, 2])
+
     def test_decorators_scope_del_and_exports(self):
         src = """
         count = 0

@@ -72,9 +72,11 @@ class PythonGenerator:
         self.in_class = False
         self.receiver_name = "self"
         self.needs_dataclass_import = False
+        self.needs_field_import = False
         self.needs_any_import = False
         self.needs_json_import = False
         self.has_explicit_dataclass_import = False
+        self.explicit_dataclass_names: set[str] = set()
         self.has_explicit_any_import = False
         self.has_explicit_json_import = False
         self.exports: list[str] = []
@@ -96,7 +98,10 @@ class PythonGenerator:
 
         header: list[str] = []
         if self.needs_dataclass_import and not self.has_explicit_dataclass_import:
-            header.append("from dataclasses import dataclass")
+            names = "dataclass, field" if self.needs_field_import else "dataclass"
+            header.append(f"from dataclasses import {names}")
+        elif self.needs_field_import and "field" not in self.explicit_dataclass_names:
+            header.append("from dataclasses import field")
         if self.needs_any_import and not self.has_explicit_any_import:
             header.append("from typing import Any")
         if self.needs_json_import and not self.has_explicit_json_import:
@@ -126,8 +131,12 @@ class PythonGenerator:
                 if any(a.name == "json" and a.asname is None for a in stmt.names):
                     self.has_explicit_json_import = True
             if isinstance(stmt, ast.ImportFromStmt):
-                if stmt.module == "dataclasses" and any(a.name in ("dataclass", "*") for a in stmt.names):
-                    self.has_explicit_dataclass_import = True
+                if stmt.module == "dataclasses":
+                    for alias in stmt.names:
+                        if alias.name in ("dataclass", "field", "*"):
+                            self.explicit_dataclass_names.add(alias.asname or alias.name)
+                        if alias.name in ("dataclass", "*"):
+                            self.has_explicit_dataclass_import = True
                 if stmt.module == "typing" and any(a.name in ("Any", "*") for a in stmt.names):
                     self.has_explicit_any_import = True
 
@@ -327,6 +336,27 @@ class PythonGenerator:
             s += f"{sep}{self.gen_expr(p.default)}"
         return s
 
+    def _dataclass_field_factory(self, default: Optional[ast.Expr]) -> Optional[str]:
+        """Return a `field(default_factory=...)` for a mutable dataclass default.
+
+        `@dataclass` rejects a `list`/`dict`/`set` default at class-creation time, and a
+        shared mutable default is wrong even where it is allowed; a factory gives every
+        instance its own value, which is what the JavaScript target's constructor default
+        already does (GAPS.md G6).
+        """
+        if isinstance(default, ast.ListExpr):
+            if not default.elts:
+                return "field(default_factory=list)"
+        elif isinstance(default, ast.DictExpr):
+            if not default.keys:
+                return "field(default_factory=dict)"
+        elif isinstance(default, ast.SetExpr):
+            if not default.elts:
+                return "field(default_factory=set)"
+        else:
+            return None
+        return f"field(default_factory=lambda: {self.gen_expr(default)})"
+
     def gen_class_def(self, cls: ast.ClassDef) -> list[str]:
         if cls.exported and self.indent_level == 0:
             self.exports.append(cls.name)
@@ -360,7 +390,11 @@ class PythonGenerator:
             else:
                 self.needs_any_import = True
                 f_line += ": Any"
-            if f.default is not None:
+            factory = self._dataclass_field_factory(f.default) if cls.is_dataclass else None
+            if factory is not None:
+                self.needs_field_import = True
+                f_line += f" = {factory}"
+            elif f.default is not None:
                 f_line += f" = {self.gen_expr(f.default)}"
             body_lines.append(f_line)
 
