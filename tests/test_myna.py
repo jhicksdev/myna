@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,28 @@ from myna import (
     parse,
     python_to_myna,
 )
+
+
+def _has_ts_runtime() -> bool:
+    """True when `myna run -t ts` can execute `.mts` files on this machine.
+
+    Bun strips types natively; Node does so from 22.6. The CI matrix still runs Node 20,
+    where the command is documented to fail, so tests must branch on the runtime rather
+    than on the wording of the error.
+    """
+    if shutil.which("bun"):
+        return True
+    node = shutil.which("node")
+    if not node:
+        return False
+    try:
+        version = subprocess.run(
+            [node, "--version"], capture_output=True, text=True, check=False
+        ).stdout
+    except OSError:
+        return False
+    match = re.match(r"v(\d+)\.(\d+)", version.strip())
+    return bool(match) and (int(match.group(1)), int(match.group(2))) >= (22, 6)
 
 
 class TestMynaTranspiler(unittest.TestCase):
@@ -783,11 +807,13 @@ class TestMynaTranspiler(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            if "needs Bun or Node" in run.stderr:
-                # No runtime that executes `.mts` on this machine.
-                self.assertEqual(run.returncode, 1)
-            else:
+            if _has_ts_runtime():
                 self.assertEqual(run.returncode, 0, run.stderr)
+            else:
+                # Documented failure on a runner without Bun or Node >= 22.6.
+                self.assertEqual(run.returncode, 1)
+                self.assertIn("needs", run.stderr)
+                self.assertIn("compile -t ts", run.stderr)
             self.assertNotIn("compile-only", run.stderr)
 
             source.write_text("@target(py)\nvalue = 1\n", encoding="utf-8")
