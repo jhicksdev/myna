@@ -778,6 +778,41 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertNotEqual(plain.returncode, 0)
         self.assertIn("cannot be invoked without 'new'", plain.stderr)
 
+    def test_quoted_module_names_import_scoped_packages(self):
+        """`<"@scope/pkg":{x}` names an npm package that Python cannot import (GAPS.md G11)."""
+        src = """
+@target(js)
+<"@opentui/core":{createCliRenderer}
+@main { p(createCliRenderer()) }
+"""
+        js_code = myna_to_js(src)
+        self.assertIn('import { createCliRenderer } from "@opentui/core";', js_code)
+        self.assertIn("createCliRenderer()", js_code.replace("new ", ""))
+        self.check_js_syntax(js_code)
+
+        with self.assertRaises(TargetError) as ctx:
+            myna_to_python(src.replace("@target(js)", "@target(py, js)"))
+        self.assertIn("JavaScript package name", str(ctx.exception))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg = root / "node_modules" / "@opentui" / "core"
+            pkg.mkdir(parents=True)
+            (pkg / "package.json").write_text(
+                '{"name": "@opentui/core", "type": "module", "main": "index.mjs"}',
+                encoding="utf-8",
+            )
+            (pkg / "index.mjs").write_text(
+                'export function createCliRenderer() { return "renderer"; }\n',
+                encoding="utf-8",
+            )
+            (root / "main.mjs").write_text(js_code, encoding="utf-8")
+            proc = subprocess.run(
+                ["node", str(root / "main.mjs")], capture_output=True, text=True
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "renderer")
+
     def test_examples_generate_valid_javascript(self):
         for path in sorted((REPO_ROOT / "examples").glob("*.myna")):
             src = path.read_text(encoding="utf-8")

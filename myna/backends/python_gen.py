@@ -7,7 +7,7 @@ import myna.ast_nodes as ast
 from myna.checks import check_call_dict_shorthand
 from myna.shorthands import BUILTIN_SHORTHANDS
 from myna.sourcemap import SOURCE_MARKER
-from myna.targets import enforce_module_target, expand_target_blocks
+from myna.targets import TargetError, enforce_module_target, expand_target_blocks
 
 
 TYPE_SHORTHANDS = {
@@ -138,12 +138,16 @@ class PythonGenerator:
             return [f"{self.ind()}type {stmt.name} = {self.gen_type(stmt.value)}"]
 
         if isinstance(stmt, ast.ImportStmt):
+            if stmt.quoted:
+                self._reject_quoted_module(stmt.names[0].name if stmt.names else "")
             parts = [f"{a.name} as {a.asname}" if a.asname else a.name for a in stmt.names]
             if stmt.level:
                 return self._gen_relative_module_imports(stmt)
             return [f"{self.ind()}import {', '.join(parts)}"]
 
         if isinstance(stmt, ast.ImportFromStmt):
+            if stmt.quoted:
+                self._reject_quoted_module(stmt.module or "")
             dots = "." * stmt.level
             mod = f"{dots}{stmt.module or ''}"
             parts = [f"{a.name} as {a.asname}" if a.asname else a.name for a in stmt.names]
@@ -221,6 +225,13 @@ class PythonGenerator:
                 res.extend(self.gen_stmt(s))
         self.indent_level -= 1
         return res
+
+    @staticmethod
+    def _reject_quoted_module(module: str) -> None:
+        raise TargetError(
+            f"module {module!r} is a JavaScript package name (quoted import); "
+            "the Python target cannot import it"
+        )
 
     def _gen_relative_module_imports(self, stmt: ast.ImportStmt) -> list[str]:
         """Lower a relative module-object import (``<.pk.mod``).

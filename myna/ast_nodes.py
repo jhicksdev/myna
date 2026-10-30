@@ -315,6 +315,7 @@ class ImportAlias:
 class ImportStmt(Stmt):
     names: list[ImportAlias] = field(default_factory=list)
     level: int = 0  # relative-import level for `<.pkg` / `<..pkg`
+    quoted: bool = False  # `<"@scope/pkg">pkg`: a JavaScript package name
 
 
 @dataclass
@@ -322,6 +323,7 @@ class ImportFromStmt(Stmt):
     module: Optional[str] = None
     level: int = 0
     names: list[ImportAlias] = field(default_factory=list)
+    quoted: bool = False  # `<"@scope/pkg":{x}`: not a dotted Python module name
 
 
 @dataclass

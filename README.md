@@ -138,7 +138,10 @@ p(slug("Hello World"))
 - `<.pkg.helper:{parse}` → `pkg/helper.myna`; `pkg` may have an `__init__.myna` or be a
   plain directory (namespace package).
 - `<.util` (no `{...}` list) binds the imported module object.
-- Absolute imports (`<json`, `<mypkg>alias`) keep their normal Python meaning.
+- Absolute imports (`<json`, `<mypkg>alias`) keep their normal Python meaning. A quoted
+  name imports a package that is not a dotted Python identifier, which is how scoped npm
+  packages work for the JS/TS targets: `<"@opentui/core":{createCliRenderer}` (the Python
+  target rejects it).
 - Imported files are compiled on first import and cached by Python's import system.
 - `myna run --module-root DIR` (or `MYNA_MODULE_ROOT=DIR`) resolves the **entry file's**
   relative imports from `DIR` instead of the entry's own directory. For the usual

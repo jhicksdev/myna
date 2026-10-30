@@ -53,6 +53,7 @@ execute.
 - `<os, sys` → `import os, sys`
 - `<numpy>np` → `import numpy as np`
 - `<pathlib:{Path, PurePath>PP}` → `from pathlib import Path, PurePath as PP`
+- `<"@scope/pkg":{a}` / `<"@scope/pkg">pkg` → JS/TS `import { a } from "@scope/pkg"` / `import * as pkg from "@scope/pkg"` (quoted names for scoped npm packages; the Python target raises `TargetError`). A quoted name needs a list or an alias.
 - `<.utils:{helper}` → `from .utils import helper`; relative imports resolve from the importing module's directory (`.pkg.mod` → `pkg/mod.myna`, directories need no `__init__.myna`). `<.pkg.mod` (no list) is `from .pkg import mod`. For `myna run`, the entry file's imports resolve from its own directory or from `--module-root DIR` / `MYNA_MODULE_ROOT` (which is also the ceiling, so `..src.util` works at any entry depth); `<.util` (no list) binds the module object. For `-t js` they become `./utils.js` specifiers; `-t ts` uses the same specifiers.
 - `@=x, y` → `global x, y` | `^=x, y` → `nonlocal x, y` | `~x[k]` → `del x[k]`
 - `$=Alias = [i]` → `type Alias = list[int]` (TS: `export type Alias = number[];`)

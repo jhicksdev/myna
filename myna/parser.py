@@ -752,7 +752,22 @@ class Parser:
             elif t.type == TT.ELLIPSIS:
                 level += 3
 
-        mod_name = self._parse_dotted_name() if self.at(TT.IDENT) else None
+        quoted = False
+        if self.at(TT.STR):
+            # `<"@opentui/core":{createCliRenderer}`: a package name that is not a dotted
+            # Python identifier (scoped npm packages in particular).
+            mod_tok = self.cur()
+            self.pos += 1
+            mod_name = mod_tok.value
+            quoted = True
+        else:
+            mod_name = self._parse_dotted_name() if self.at(TT.IDENT) else None
+        if quoted and not self.at(TT.COLON, TT.GT):
+            raise ParseError(
+                "a quoted module name needs an import list or an alias, "
+                'as in <"@scope/pkg":{name} or <"@scope/pkg">pkg',
+                tok,
+            )
 
         # `<mod:{a, b>alias}` or `<.mod:{a}` or `<.:{a}`
         if self.match(TT.COLON):
@@ -776,7 +791,14 @@ class Parser:
                 n = self.expect(TT.IDENT, "imported symbol").value
                 asname = self.expect(TT.IDENT, "alias").value if self.match(TT.GT) else None
                 names.append(ast.ImportAlias(name=n, asname=asname))
-            return ast.ImportFromStmt(module=mod_name, level=level, names=names, line=tok.line, col=tok.col)
+            return ast.ImportFromStmt(
+                module=mod_name,
+                level=level,
+                names=names,
+                quoted=quoted,
+                line=tok.line,
+                col=tok.col,
+            )
 
         # Standard `<os, numpy>np`
         if mod_name is None:
@@ -787,7 +809,9 @@ class Parser:
             m = self._parse_dotted_name()
             a = self.expect(TT.IDENT, "module alias").value if self.match(TT.GT) else None
             aliases.append(ast.ImportAlias(name=m, asname=a))
-        return ast.ImportStmt(names=aliases, level=level, line=tok.line, col=tok.col)
+        return ast.ImportStmt(
+            names=aliases, level=level, quoted=quoted, line=tok.line, col=tok.col
+        )
 
     def _parse_dotted_name(self) -> str:
         parts = [self.expect(TT.IDENT, "identifier").value]

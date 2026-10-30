@@ -100,6 +100,7 @@ strips all annotations; TypeScript emits them.
 | `<numpy>np` | `import numpy as np` | `import * as np from 'numpy';` |
 | `<pathlib:{Path, PurePath>PP}` | `from pathlib import Path, PurePath as PP` | `import { Path, PurePath as PP } from 'pathlib';` |
 | `<.utils:{helper}` | `from .utils import helper` | `import { helper } from './utils.js';` |
+| `<"@scope/pkg":{a}>` | *(not a Python module)* | `import { a } from "@scope/pkg";` |
 | `@target(py)` / `@target(py, js)` | module target contract (default: `py`) | same (`js` also permits `-t ts`; there is no `@target(ts)`) |
 | `@target(py) { ... }` | compile-time block, emitted only for Python | same (module-level only, imports become top-level; `@target(js)` also applies to `-t ts`) |
 | `+@f(...)` / `+$C` | `def f(...)` + adds to `__all__` | `export function f(...)` / `export class C` |
@@ -109,6 +110,11 @@ strips all annotations; TypeScript emits them.
 In language 0.6 a module with no declaration is treated as `@target(py)`. Portability is
 opt-in: add `@target(py, js)` to a module that must compile for JavaScript or TypeScript
 (`DECISIONS.md` D-003).
+
+A module name may be quoted when it is not a dotted identifier — scoped npm packages in
+particular: `<"@opentui/core":{createCliRenderer}` or `<"@opentui/core">core`. A quoted name
+needs an import list or an alias. The JavaScript and TypeScript targets emit the name
+as-is; the Python target raises `TargetError` for it.
 
 Relative imports resolve against the importing module's directory: `<.util:{f}` loads `util.myna` beside the importing module, `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package), and `<.util` without a name list binds the imported module object. A dotted module-object import keeps its submodule meaning: `<.pkg.mod` is `from .pkg import mod`, so `mod.v()` works. A program's entry file instead resolves against its own directory when run with `myna run`, or against `--module-root DIR` / `MYNA_MODULE_ROOT` when set, which lets an entry in `tests/` reach a sibling `src/`; a declared module root is also the ceiling, so `<..src.util` from an entry of any depth resolves against that root. Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
 
