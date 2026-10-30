@@ -188,6 +188,35 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["pairs"], [(0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)])
         self.assertEqual(ns["merged"], {"a": 1, "b": 20, "c": 30})
 
+    def test_match_expression_form(self):
+        """`?? v { pat => expr }` is an expression; statement arms need a block (G13)."""
+        ns = self.exec_myna(
+            """
+        @classify(v:i)->s {
+            base = 2
+            ^ ?? v { 0 => "zero"; n ? n > base => "big"; _ => "small" }
+        }
+        r0 = classify(0)
+        r1 = classify(9)
+        r2 = classify(1)
+        inline = p(?? 3 { 3 => "three"; _ => "?" })
+        """
+        )
+        self.assertEqual((ns["r0"], ns["r1"], ns["r2"]), ("zero", "big", "small"))
+
+        # A statement-form arm holding a bare value silently did nothing.
+        with self.assertRaises(ParseError) as ctx:
+            myna_to_python('?? v { 0 => "zero" }')
+        self.assertIn("does nothing", str(ctx.exception))
+
+        # A statement arm with a side effect is fine.
+        ns = self.exec_myna('?? 0 { 0 => p("hit") }')
+        self.assertIn("__builtins__", ns)
+
+        # Without `_`, an unmatched subject yields None / undefined rather than raising.
+        ns = self.exec_myna("x = ?? 5 { 0 => 1 }\n")
+        self.assertIsNone(ns["x"])
+
     def test_new_is_a_plain_call_on_python(self):
         """`new C(...)` is a constructor call; Python has no `new`, so it emits `C(...)`."""
         src = "$$P(x:i)\np1 = new P(3)\np2 = P(4)\n"

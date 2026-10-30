@@ -813,6 +813,35 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), "renderer")
 
+    def test_cross_target_match_expression(self):
+        """`?? v { pat => expr }` in expression position (GAPS.md G13)."""
+        src = """
+@tier(score:i)->s {
+    base = 10
+    ^ ?? score {
+        0 => "zero"
+        n ? n > base => `big:{n}`
+        _ => "small"
+    }
+}
+
+@label(k:s)->s => ?? k { "a" => "A"; "b" | "c" => "BC"; _ => "?" }
+
+@main {
+    p(tier(0))
+    p(tier(50))
+    p(tier(5))
+    p(label("a"))
+    p(label("c"))
+    p(label("z"))
+}
+"""
+        py_out, js_out = self.run_both_targets(src)
+        self.assertEqual(py_out, js_out)
+        self.assertEqual(
+            py_out.splitlines(), ["zero", "big:50", "small", "A", "BC", "?"]
+        )
+
     def test_examples_generate_valid_javascript(self):
         for path in sorted((REPO_ROOT / "examples").glob("*.myna")):
             src = path.read_text(encoding="utf-8")

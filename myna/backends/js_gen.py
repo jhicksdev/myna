@@ -1232,7 +1232,7 @@ class JSGenerator:
                 self.indent_level -= 1
                 self.pop_scope()
             else:
-                cond = f"__myna_eq(__match_val, {self.gen_expr(c.pattern)})"
+                cond = self._match_pattern_cond("__match_val", c.pattern)
                 if c.guard is not None:
                     cond = f"({cond}) && (__myna_truthy({self.gen_expr(c.guard)}))"
                 lines.append(f"{self.ind()}{kw} ({cond}) {{")
@@ -1597,6 +1597,9 @@ class JSGenerator:
             )
             return self.gen_expr(rewritten, parent_prec)
 
+        if isinstance(expr, ast.MatchExpr):
+            return self.gen_match_expr(expr)
+
         if isinstance(expr, ast.NewExpr):
             return self.gen_new(expr)
 
@@ -1832,6 +1835,60 @@ class JSGenerator:
                     kw_items.append(f"{k}: {self.gen_expr(v)}")
             arg_parts.append(f"{{{', '.join(kw_items)}}}")
         return f"{func_s}({', '.join(arg_parts)})"
+
+    def _match_pattern_cond(self, value: str, pattern: ast.Expr) -> str:
+        """`__myna_eq` for one case label, with `a | b` as an alternative set."""
+        if isinstance(pattern, ast.BinaryOp) and pattern.op == "|":
+            left = self._match_pattern_cond(value, pattern.left)
+            right = self._match_pattern_cond(value, pattern.right)
+            return f"({left}) || ({right})"
+        return f"__myna_eq({value}, {self.gen_expr(pattern)})"
+
+    def _match_param(self, name: str) -> str:
+        """The arrow parameter used to evaluate a match subject once (TS adds a type)."""
+        return name
+
+    def gen_match_expr(self, expr: ast.MatchExpr) -> str:
+        """Compile `?? v { pat => expr }` to a nested conditional over one evaluation."""
+        self.use_helper("eq")
+        self.use_helper("truthy")
+        self.match_counter = getattr(self, "match_counter", 0) + 1
+        val = f"__myna_match_val_{self.match_counter}"
+        chain = "undefined"
+        for case in reversed(expr.cases):
+            pat = case.pattern
+            is_wildcard = isinstance(pat, ast.Ident) and pat.name == "_"
+            is_capture = isinstance(pat, ast.Ident) and not is_wildcard
+            self.push_scope({pat.name} if is_capture else set())
+            try:
+                body = self.gen_expr(case.body[0].expr) if case.body else "undefined"
+                guard = (
+                    self.gen_expr(case.guard) if case.guard is not None else None
+                )
+            finally:
+                self.pop_scope()
+
+            if is_wildcard and guard is None:
+                chain = body
+                continue
+            if is_capture:
+                bound = js_ident(pat.name)
+                arm = f"(({bound}) => ({body}))({val})"
+                if guard is None:
+                    chain = arm
+                else:
+                    self.push_scope({pat.name})
+                    try:
+                        cond = self.gen_expr(case.guard)
+                    finally:
+                        self.pop_scope()
+                    chain = f"__myna_truthy((({bound}) => ({cond}))({val})) ? {arm} : {chain}"
+                continue
+            cond = self._match_pattern_cond(val, pat)
+            if guard is not None:
+                cond = f"({cond}) && __myna_truthy({guard})"
+            chain = f"({cond}) ? ({body}) : {chain}"
+        return f"(({self._match_param(val)}) => {chain})({self.gen_expr(expr.subject)})"
 
     def gen_new(self, expr: ast.NewExpr) -> str:
         """Emit `new C(...)`: an external class constructor, which JS cannot call plainly."""

@@ -334,6 +334,7 @@ Running `stats` directly on a `.myna` file instead compares the generated Python
 | **Key Lookup** | `d$key` / `d$?key ?? "def"` | `d["key"]` / `d.get("key") or "def"` | `d["key"]` / `d.get("key") ?? "def"` |
 | **Branching** | `? c1 {...} :? c2 {...} : {...}` | `if c1: ... elif c2: ... else: ...` | `if (c1) {...} else if (c2) {...} else {...}` |
 | **Pattern Match** | `?? v { 0 => {...}; x ? x>0 => {...}; _ => {...} }` | `match v: case 0: ... case x if x > 0: ... case _: ...` | Block-scoped pattern & guard dispatch |
+| **Match Expression** | `t = ?? v { 0 => "zero"; _ => "other" }` | Evaluates to the matched arm's value | Nested conditional |
 | **Loops** | `% x <- 0..10 { ... }` / `%? cond { ... }` | `for x in range(10): ...` / `while cond: ...` | `for (let x = 0; x < 10; x += 1)` / `while (cond)` |
 | **Comprehensions** | `[x*2 \| x <- items ? x > 0]` | `[x * 2 for x in items if x > 0]` | `items.filter(x => x > 0).map(x => x * 2)` |
 | **Exceptions** | `!{ ... } !!e:ValueError { ... } !: { ... }` | `try: ... except ValueError as e: ... finally: ...` | `try { ... } catch (e) { ... } finally { ... }` |

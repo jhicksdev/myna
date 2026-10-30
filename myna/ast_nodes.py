@@ -384,6 +384,14 @@ class MatchStmt(Stmt):
 
 
 @dataclass
+class MatchExpr(Expr):
+    """`?? subject { pat => expr; ... }` in expression position."""
+
+    subject: Expr = field(default_factory=Expr)
+    cases: list[MatchCase] = field(default_factory=list)  # body holds one ExprStmt
+
+
+@dataclass
 class ForStmt(Stmt):
     target: Expr = field(default_factory=Expr)
     iter: Expr = field(default_factory=Expr)

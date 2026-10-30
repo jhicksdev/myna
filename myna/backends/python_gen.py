@@ -28,6 +28,10 @@ class PythonGenerator:
         # When set, every emitted statement is prefixed with a `# myna:LINE` marker so a
         # caller can build a generated-line -> Myna-line table (`myna.sourcemap`).
         self.sourcemap = sourcemap
+        # Helper `def`s for expression-position constructs, hoisted into the enclosing
+        # block so they can see its locals (see `gen_match_expr`).
+        self.pending_defs: list[list[str]] = []
+        self.match_counter = 0
         self.indent_level = 0
         self.in_class = False
         self.receiver_name = "self"
@@ -105,9 +109,13 @@ class PythonGenerator:
     # ========================================================================
 
     def gen_stmt(self, stmt: ast.Stmt) -> list[str]:
+        before = len(self.pending_defs)
+        chunk = self._gen_stmt(stmt)
+        defs = [line for block in self.pending_defs[before:] for line in block]
+        del self.pending_defs[before:]
         if self.sourcemap:
-            return [f"{self.ind()}{SOURCE_MARKER}{stmt.line}", *self._gen_stmt(stmt)]
-        return self._gen_stmt(stmt)
+            chunk = [f"{self.ind()}{SOURCE_MARKER}{stmt.line}", *chunk]
+        return defs + chunk
 
     def _gen_stmt(self, stmt: ast.Stmt) -> list[str]:
         if isinstance(stmt, ast.NoopStmt):
@@ -225,6 +233,37 @@ class PythonGenerator:
                 res.extend(self.gen_stmt(s))
         self.indent_level -= 1
         return res
+
+    def gen_match_expr(self, expr: ast.MatchExpr) -> str:
+        """Compile `?? v { pat => expr }` to a hoisted `match` helper call.
+
+        Python has no match *expression*, so a small `def` using a real `match` statement
+        is hoisted into the enclosing block. That keeps every pattern form (alternatives,
+        guards, captures) and lets the helper close over the block's locals.
+
+        Without a `_` arm the helper falls through and returns `None`; add one to be
+        exhaustive.
+        """
+        self.match_counter += 1
+        name = f"__myna_match_{self.match_counter}"
+        outer = self.ind()
+        inner = outer + self.indent_str
+        lines = [f"{outer}def {name}(__myna_v):", f"{inner}match __myna_v:"]
+        if not expr.cases:
+            lines.append(f"{inner}{self.indent_str}case _:")
+            lines.append(f"{inner}{self.indent_str}{self.indent_str}return None")
+        for case in expr.cases:
+            pat_s = self.gen_expr(case.pattern)
+            guard_s = (
+                f" if {self.gen_expr(case.guard)}" if case.guard is not None else ""
+            )
+            value = case.body[0].expr if case.body else ast.Literal(value=None, kind="none")
+            lines.append(f"{inner}{self.indent_str}case {pat_s}{guard_s}:")
+            lines.append(
+                f"{inner}{self.indent_str}{self.indent_str}return {self.gen_expr(value)}"
+            )
+        self.pending_defs.append(lines)
+        return f"{name}({self.gen_expr(expr.subject)})"
 
     @staticmethod
     def _reject_quoted_module(module: str) -> None:
@@ -712,6 +751,9 @@ class PythonGenerator:
                 )
                 return self.gen_expr(rewritten, parent_prec)
             return f"{self.gen_expr(expr.right, 90)}({self.gen_expr(expr.left)})"
+
+        if isinstance(expr, ast.MatchExpr):
+            return self.gen_match_expr(expr)
 
         if isinstance(expr, ast.NewExpr):
             # Python has no `new`; a class call is the constructor.

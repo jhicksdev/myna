@@ -187,11 +187,24 @@ default, so every instance gets its own value rather than a shared mutable objec
 | `: { ... }` | `else:` | `else { ... }` |
 | `?? subject { pat => { ... }; _ => { ... } }` | `match subject:\n    case pat: ...\n    case _: ...` | `switch (subject) { ... }` |
 | `?? subject { pat ? guard => expr }` | `case pat if guard: ...` | Switch with guard |
+| `?? subject { pat => expr; _ => expr }` *(in an expression)* | `(hoisted `match` helper call)` | Nested conditional over one evaluation |
 | `^expr` / `^` | `return expr` / `return` | `return expr;` / `return;` |
 | `^*expr` | `yield expr` | `yield expr;` |
 | `^**expr` | `yield from expr` | `yield* expr;` |
 | `^!` | `break` | `break;` |
 | `^>` | `continue` | `continue;` |
+
+A `??` in expression position is a **match expression**: arms are `pat => expr` (no
+blocks) and the value of the matched arm is the value of the expression. The subject is
+evaluated once, patterns and guards behave exactly as in the statement form, and capture
+patterns (`n =>`) bind within their arm and guard. Without a `_` arm an unmatched subject
+yields `None`, so add `_` to be exhaustive. The Python target lowers it to a small
+`match` helper hoisted into the enclosing block; JavaScript and TypeScript build a nested
+conditional.
+
+In the *statement* form an arm still needs a block (`=> { ^ expr }`) or a statement with a
+side effect; a bare value in statement position is a parse error because it would be
+computed and discarded.
 
 ---
 

@@ -78,6 +78,7 @@ execute.
 ### Control Flow, Loops & Comprehensions
 - `? c1 { ... } :? c2 { ... } : { ... }` → `if c1: ... elif c2: ... else: ...`
 - `?? val { 0 => {^"zero"}; x ? x>0 => {^"pos"}; _ => {^"neg"} }` → `match val: case ...`
+- `t = ?? val { 0 => "zero"; _ => "other" }` → match **expression**: arms are expressions (no blocks), the value is the matched arm's; the subject is evaluated once; without `_` an unmatched value is `N`/`undefined`
 - `% x <- it { ... }` → `for x in it:` (`%~` = `async for`, `%:` = loop `else`)
 - `%? cond { ... }` → `while cond:`
 - `^val` = `return val` | `^!` = `break` | `^>` = `continue`

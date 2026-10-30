@@ -583,12 +583,47 @@ class Parser:
                     c_body = self.parse_block()
                 else:
                     c_body = [self.parse_stmt()]
+                    single = c_body[0]
+                    if isinstance(single, ast.ExprStmt) and isinstance(
+                        single.expr, (ast.Literal, ast.Ident)
+                    ):
+                        raise ParseError(
+                            "this match arm does nothing: a bare value in statement "
+                            "position is discarded; wrap it in a block ending in '^', "
+                            "or use the expression form `p(?? v { pat => expr })`",
+                            self.cur(),
+                        )
             else:
                 c_body = [ast.NoopStmt()]
             cases.append(ast.MatchCase(pattern=pat, guard=guard, body=c_body))
             self.skip_seps()
         self.expect(TT.RBRACE, "'}' after match cases")
         return ast.MatchStmt(subject=subject, cases=cases, line=tok.line, col=tok.col)
+
+    def parse_match_expr(self) -> ast.MatchExpr:
+        tok = self.expect(TT.QMARK_QMARK)
+        subject = self.parse_expr(stop_before_lbrace=True)
+        self.skip_newlines()
+        self.expect(TT.LBRACE, "'{' for match cases")
+        cases: list[ast.MatchCase] = []
+        self.skip_seps()
+        while not self.at(TT.RBRACE, TT.EOF):
+            pat = self.parse_expr(min_bp=25, stop_before_lbrace=True)
+            guard: Optional[ast.Expr] = None
+            if self.match(TT.QMARK):
+                guard = self.parse_expr(stop_before_lbrace=True)
+            self.expect(TT.FAT_ARROW, "'=>' in match expression")
+            value = self.parse_expr()
+            cases.append(
+                ast.MatchCase(
+                    pattern=pat,
+                    guard=guard,
+                    body=[ast.ExprStmt(expr=value, line=value.line, col=value.col)],
+                )
+            )
+            self.skip_seps()
+        self.expect(TT.RBRACE, "'}' after match cases")
+        return ast.MatchExpr(subject=subject, cases=cases, line=tok.line, col=tok.col)
 
     def parse_for_stmt(self) -> ast.ForStmt:
         tok = self.cur()
@@ -1169,6 +1204,10 @@ class Parser:
         if tok.type == TT.ELLIPSIS:
             self.pos += 1
             return ast.Literal(value="...", kind="ellipsis", line=tok.line, col=tok.col)
+
+        # Match in expression position: `p(?? v { 0 => "zero"; _ => "other" })`.
+        if tok.type == TT.QMARK_QMARK:
+            return self.parse_match_expr()
 
         # Explicit constructor call `new C(a, b)`: JavaScript/TypeScript emit `new`.
         if (

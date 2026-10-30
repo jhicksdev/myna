@@ -464,6 +464,10 @@ class TSGenerator(JSGenerator):
         """Resolve `Self` to the enclosing class, or `any` outside a class."""
         return js_ident(self.current_class) if self.current_class else "any"
 
+    def _match_param(self, name: str) -> str:
+        # `tsc --strict` has no contextual type for an immediately-invoked arrow.
+        return f"{name}: any"
+
     def _gen_callable_type(self, args: list[ast.TypeNode]) -> str:
         if len(args) < 2:
             return "(...args: any[]) => any"
