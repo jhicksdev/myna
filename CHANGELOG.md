@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+## 0.6.1 (2026-10-29)
+
+Correctness patch from the Starling downstream report (`GAPS.md`). No new syntax, no CLI
+surface change, no behaviour change for programs that compiled correctly before.
+
+### Fixed
+
+- `T`, `F`, `N`, and `U` are reserved binding names. A class, function, parameter,
+  variable, loop target, or import alias with one of those names was accepted and then
+  resolved to the literal at every use site, so `$$U(a:i)` compiled to `None(1)`.
+  `python_to_myna` renames such Python bindings (`class U` → `$U_`) to keep the
+  round-trip contract. See `DECISIONS.md` D-007.
+- A relative module-object import with a dotted name (`<.pkg.mod`) emitted
+  `from . import pkg.mod`, which is not valid Python. It now emits
+  `from .pkg import mod`, keeping any alias.
+- A dataclass field defaulting to a list, dict, or set literal (`$$D(xs:[s]=[])`) emitted
+  a class-level mutable default that `@dataclass` rejects at import time. It is emitted as
+  `field(default_factory=...)`, so each instance gets its own value — matching what the
+  JavaScript/TypeScript targets already did.
+- `@name` in expression position is accepted only for the builtin aliases (plus
+  `@u8`/`@u8d`); any other name raised no error and produced invalid Python
+  (`p(@f(2))` → `print(@f(2))`).
+- `{Content-Type: "json"}` parsed as a subtraction and failed at run time. A dict key that
+  is a subtraction or division of two identifiers is now a parse error telling the reader
+  to quote it; `{(a-b): 1}` still computes a key.
+- `myna run` tracebacks point at the `.myna` line with the Myna source, including failures
+  inside imported `.myna` modules, and no longer print runner frames. `myna_to_python` /
+  `compile_to_python` take an optional `sourcemap=True` for the underlying line mapping;
+  default output is unchanged.
+- `--module-root` is now a ceiling for the entry file, so `<..src.util` from an entry in
+  `tests/` resolves against the declared root instead of failing with "attempted relative
+  import beyond top-level package". `myna run`, `myna bundle`, the zipapp, and the
+  JavaScript/TypeScript resolver all apply the same rule.
+- A bare `raise` written as `=>!^` immediately followed by a compound clause (`!!`, `%:`,
+  `:?`) was parsed as the start of a raise expression.
+- The decompiler emitted a one-statement `for`/`while`/`with` body as `=>stmt`, which
+  re-parsed as a paren lambda; those bodies now use braces.
+
+### Documentation
+
+- `SPEC.md` now documents dict literals, `d$key`/`d$?key` key access, call-site `k: v`
+  dicts versus `k=v` keyword arguments, and `@` in expressions — the behaviours behind
+  several entries in the downstream report.
+- Documented the reserved literal names, the module-root ceiling, mutable dataclass
+  defaults, and `myna run` tracebacks in `README.md`, `SPEC.md`, and
+  `skills/myna/SKILL.md`.
+
 ## 0.6.0 (2026-10-29)
 
 ### Added

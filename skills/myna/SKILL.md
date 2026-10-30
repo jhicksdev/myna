@@ -44,6 +44,7 @@ execute.
 
 ### Literals, Types & Constants
 - `T` = `True`, `F` = `False`, `N` = `None`, `_` (standalone in `{_}`) = `pass`
+- `T`, `F`, `N`, `U` are **reserved**: never use them as a class, function, parameter, variable, loop-target, or import-alias name (parse error). Use `T_`, `Node`, etc.
 - `` `hi {x:.2f}` `` = `f"hi {x:.2f}"` (escapes: `` \` ``, `\\`, `\n`, `\t`, `\r`, `\a`, `\b`, `\f`, `\v`, `\xNN`, `\uNNNN`, `\ooo`; unknown escapes are errors), `_"raw"` = `r"raw"`, `0b"bytes"` = `b"bytes"` (literal text is UTF-8; `\xNN`/octal escapes are raw bytes)
 - **Types:** `i`=`int`, `f`=`float`, `s`=`str`, `b`=`bool`, `B`=`bytes`, `A`=`Any`, `N`=`None` (TS: `number`, `number`, `string`, `boolean`, `Uint8Array`, `any`, `null`)
 - **Compound Types:** `T?`=`T | None`, `[T]`=`list[T]`, `{K:V}`=`dict[K, V]`, `{T}`=`set[T]`, `(T1,T2)`=`tuple[T1, T2]` (TS: `T | null`, `T[]`, `Record<K, V>`, `Set<T>`, `[T1, T2]`)
@@ -52,7 +53,7 @@ execute.
 - `<os, sys` → `import os, sys`
 - `<numpy>np` → `import numpy as np`
 - `<pathlib:{Path, PurePath>PP}` → `from pathlib import Path, PurePath as PP`
-- `<.utils:{helper}` → `from .utils import helper`; relative imports resolve from the importing module's directory (`.pkg.mod` → `pkg/mod.myna`, directories need no `__init__.myna`). For `myna run`, the entry file's imports resolve from its own directory or from `--module-root DIR` / `MYNA_MODULE_ROOT`; `<.util` (no list) binds the module object. For `-t js` they become `./utils.js` specifiers; `-t ts` uses the same specifiers.
+- `<.utils:{helper}` → `from .utils import helper`; relative imports resolve from the importing module's directory (`.pkg.mod` → `pkg/mod.myna`, directories need no `__init__.myna`). `<.pkg.mod` (no list) is `from .pkg import mod`. For `myna run`, the entry file's imports resolve from its own directory or from `--module-root DIR` / `MYNA_MODULE_ROOT` (which is also the ceiling, so `..src.util` works at any entry depth); `<.util` (no list) binds the module object. For `-t js` they become `./utils.js` specifiers; `-t ts` uses the same specifiers.
 - `@=x, y` → `global x, y` | `^=x, y` → `nonlocal x, y` | `~x[k]` → `del x[k]`
 - `$=Alias = [i]` → `type Alias = list[int]` (TS: `export type Alias = number[];`)
 - `@target(py)` → module is Python-only (the default when no declaration is present); `@target(py, js)` opts into portability. Must precede all code. `js` also permits `-t ts`; there is no `@target(ts)`.
@@ -64,7 +65,7 @@ execute.
 - `*@gen(n) { %i<-..n { ^*i } }` → generator (`^*` = `yield`, `^**` = `yield from`)
 - `x => x+1` or `(a,b) => a+b` → `lambda`
 - `$C < Base { @init(x){ .x=x; ..init() } }` → `class C(Base): def __init__(self, x): self.x = x; super().__init__()`
-- `$$User(id:i, name:s="anon") { ... }` → `@dataclass class User:` with typed fields
+- `$$User(id:i, name:s="anon") { ... }` → `@dataclass class User:` with typed fields (`=[s]=[]`-style list/dict/set defaults become `field(default_factory=...)`, one value per instance)
 - **Class Methods (implicit `self`/`cls`, `.attr` = `self.attr`, `..m()` = `super().m()`):**
   - `@/f(a){...}` → `@staticmethod` | `@$f(a){...}` → `@classmethod`
   - `@?prop{^._x}` → `@property` | `@=prop(v){._x=v}` → `@prop.setter`
@@ -91,12 +92,13 @@ execute.
 
 ### Operators, Dict Shorthands & Built-in Aliases
 - **Dict Shorthands:**
-  - Unquoted keys: `{error: "msg", code: 400}` → `{"error": "msg", "code": 400}` (`{[k]: v}` for dynamic key `k`)
+  - Unquoted keys: `{error: "msg", code: 400}` → `{"error": "msg", "code": 400}` (`{[k]: v}` for dynamic key `k`; a key containing `-` or `/` must be quoted — `{Content-Type: 1}` is a parse error)
   - Self-field punning: `{.id, .title, .done}` → `{"id": self.id, "title": self.title, "done": self.done}`
   - Variable punning: `{=name, count}` → `{"name": name, "count": count}`
   - Trailing dict argument in calls: `send(200, status: "ok", id: 1)` → `send(200, {"status": "ok", "id": 1})`
   - Keyword argument punning: `Request(url, =data, =headers)` → `Request(url, data=data, headers=headers)`
-  - String-key lookup & `.get()`: `d$todos` → `d["todos"]` | `d$?title ?? "default"` → `d.get("title") or "default"`
+  - String-key lookup & `.get()`: `d$todos` → `d["todos"]` | `d$?title ?? "default"` → `d.get("title") or "default"` (both take a **literal** key; use `d[k]` for a computed key)
+- **`@` in expressions:** `@name` is only valid for the built-in aliases (`@j`, `@srt`, `@u8`, …); `p(@f(2))` is a parse error, not a decorator.
 - **Braceless `=>` Single-Statement Bodies:**
   - Functions/methods: `@to_dict->{s:A} => {.id, .title}` (implicitly returns expression)
   - Control/context blocks: `? x <= 0 => ^ {}` | `!!:ValueError => ^ "bad"` | `!& f=open(p) => ^ f.read()`

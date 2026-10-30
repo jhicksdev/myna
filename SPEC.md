@@ -39,6 +39,12 @@ are erased and never add runtime checks; unannotated parameters are emitted as e
 | `0b"bytes"` | `b"bytes"` | `new Uint8Array([...])` | Byte literal (literal text is UTF-8; `\xNN`/octal escapes produce raw byte values) |
 | `# comment` | `# comment` | `// comment` | Single-line comment (`#` followed by space, `#`, or newline; note `//` is floor division) |
 
+`T`, `F`, `N`, and `U` **cannot be used as binding names** — a class, function, parameter,
+variable, loop target, import alias, or `except` name spelled with one of those letters is a
+parse error (`DECISIONS.md` D-007). They parse as literals at every use site, so a binding
+with one of those names would silently resolve to `True`/`False`/`None` instead of the
+value it holds.
+
 Strings decode Python's escape set: `\a \b \f \n \r \t \v \\ \' \"`, octal `\ooo`,
 `\xNN`, `\uNNNN`, `\UNNNNNNNN`, `\N{NAME}`, and a backslash-newline line continuation.
 An unknown or malformed escape is a lexer error instead of a silently kept backslash; use
@@ -104,7 +110,7 @@ In language 0.6 a module with no declaration is treated as `@target(py)`. Portab
 opt-in: add `@target(py, js)` to a module that must compile for JavaScript or TypeScript
 (`DECISIONS.md` D-003).
 
-Relative imports resolve against the importing module's directory: `<.util:{f}` loads `util.myna` beside the importing module, `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package), and `<.util` without a name list binds the imported module object. A program's entry file instead resolves against its own directory when run with `myna run`, or against `--module-root DIR` / `MYNA_MODULE_ROOT` when set, which lets an entry in `tests/` reach a sibling `src/`. Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
+Relative imports resolve against the importing module's directory: `<.util:{f}` loads `util.myna` beside the importing module, `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package), and `<.util` without a name list binds the imported module object. A dotted module-object import keeps its submodule meaning: `<.pkg.mod` is `from .pkg import mod`, so `mod.v()` works. A program's entry file instead resolves against its own directory when run with `myna run`, or against `--module-root DIR` / `MYNA_MODULE_ROOT` when set, which lets an entry in `tests/` reach a sibling `src/`; a declared module root is also the ceiling, so `<..src.util` from an entry of any depth resolves against that root. Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
 
 For the JavaScript target a relative import becomes a relative ES module specifier
 (`<.util:{slug}` → `import { slug } from "./util.js"`, with the extension following
@@ -151,6 +157,10 @@ classes. A `$$` dataclass subclass may inherit a dataclass defined in the same m
 its generated constructor takes the base's fields and forwards them to `super(...)`.
 A class with an explicit `@init` must call the base constructor with `..init(...)` when
 it has a base.
+
+A dataclass field may default to a list, dict, or set literal (`$$D(xs:[s]=[])`): Python
+emits `field(default_factory=...)` and the JavaScript/TypeScript targets emit a constructor
+default, so every instance gets its own value rather than a shared mutable object.
 
 ---
 
@@ -213,6 +223,19 @@ only valid when the try has at least one handler.
 
 ## 8. Operators & Built-in Shorthands
 
+### Dict Literals, Key Access & Call-Site Dicts
+| Myna | Python | Notes |
+| :--- | :--- | :--- |
+| `{error: "msg", code: 400}` | `{"error": "msg", "code": 400}` | A bare identifier key is a string key |
+| `{"Content-Type": "json"}` | `{"Content-Type": "json"}` | Quote a key containing `-` or `/`; `{Content-Type: …}` is a parse error, not a subtraction |
+| `{[k]: v}` | `{k: v}` | Computed key |
+| `{**base, a: 1}` | `{**base, "a": 1}` | Spread |
+| `{=name}` / `{.attr}` | `{"name": name}` / `{"attr": self.attr}` | Variable / self-field punning |
+| `d$key` / `d$?key` | `d["key"]` / `d.get("key")` | **Literal** key only; use `d[k]` for a computed key |
+| `f(a, k: v)` | `f(a, {"k": v})` | A trailing `k: v` argument is a dict literal |
+| `f(a, k=v)` | `f(a, k=v)` | Keyword argument |
+
+
 ### Prefix Operators (in Expressions)
 | Myna | Python | JavaScript |
 | :--- | :--- | :--- |
@@ -255,3 +278,7 @@ types is a **union** — `x :? (i, s)` is `isinstance(x, (int, str))`, not a tup
 | `@sum(x)` / `@min(x)` / `@max(x)` | `sum(x)` / `min(x)` / `max(x)` | Array reduction |
 | `@str(x)` / `@int(x)` / `@flt_n(x)` | `str(x)` / `int(x)` / `float(x)` | `String(x)` / `Number(x)` |
 | `@ main { ... }` | `if __name__ == "__main__": ...` | Entrypoint check |
+
+`@name` is accepted in expression position only for the aliases above (plus `@u8`/`@u8d`);
+any other `@name` inside an expression is a parse error, because `@` also introduces
+decorators and the `@main` block.

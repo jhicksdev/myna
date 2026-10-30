@@ -151,6 +151,12 @@ p(slug("Hello World"))
   Modules imported from that root still resolve their own relative imports from their own
   directory. With a module root set, the entry's own directory is not searched, so a
   file beside the entry is imported by its path from the root (e.g. `<.tests.harness`).
+  The root is also the ceiling: `<..src.util` from an entry of any depth resolves against
+  it, so a nested entry can reach a sibling `src/` with `..` as well as with `.`. A
+  relative import that would climb past the root is an error when no root is declared.
+- `myna run` reports a runtime failure with the Myna line and the Myna source line, not
+  the generated Python: failures inside imported `.myna` modules map the same way, and
+  frames from the runner itself are omitted.
 - `myna bundle src/main.myna -o app.py` embeds the whole relative-import graph in one
   standalone Python file. It runs with a plain `python3` and does not need `myna`
   installed; absolute imports still come from the environment.
@@ -329,6 +335,10 @@ Running `stats` directly on a `.myna` file instead compares the generated Python
 | **Exceptions** | `!{ ... } !!e:ValueError { ... } !: { ... }` | `try: ... except ValueError as e: ... finally: ...` | `try { ... } catch (e) { ... } finally { ... }` |
 | **With / Assert** | `!& f=open(p) { ... }` / `!? cond, "msg"` | `with open(p) as f:` / `assert cond, "msg"` | Scoped try/finally `.close()` / `if (!cond) throw ...` |
 | **Built-in Aliases** | `p`, `#x`, `@j`, `@J`, `@u8`, `@u8d`, `@srt`, `@sum` | `print`, `len(x)`, `json.loads`, `json.dumps`, `.encode`, `.decode`, `sorted`, `sum` | `console.log`, `len`, `JSON.parse`, `JSON.stringify`, `TextEncoder`, `TextDecoder`, `.sort`, `.reduce` |
+
+`T`, `F`, `N`, and `U` are reserved: they cannot name a class, function, parameter,
+variable, loop target, or import alias. `d$key` is a *literal* key lookup — use `d[k]` for a
+computed key — and a trailing `k: v` argument is a dict, while `k=v` is a keyword argument.
 
 See [`SPEC.md`](https://github.com/jhicksdev/myna/blob/main/SPEC.md) for the complete language specification and [`skills/myna/SKILL.md`](https://github.com/jhicksdev/myna/blob/main/skills/myna/SKILL.md) for the AI agent skill file.
 

@@ -254,3 +254,36 @@ TypeScript is an **output dialect** of the JavaScript target, not a third target
 - Whether generated `.d.ts` sidecars or type inference for Myna become worthwhile.
 - Browser-oriented output would need a different `@main` guard and DOM type story.
 
+
+---
+
+## D-007 — `T`, `F`, `N`, `U` are reserved as binding names
+
+**Status:** Accepted — 2026-10-29
+**Supersedes:** none
+
+### Context
+
+`T`, `F`, `N`, and `U` are the boolean, `None`, and `undefined` literals (D-001). They are
+also legal identifiers, so a program could declare a class named `U` and then call
+`U(1)`; the *use* parsed as the `undefined` literal and the program compiled to
+`None(1)` and failed at run time. Downstream this survived review because the source
+looked correct (GAPS.md G1). Myna has no scope-sensitive literal parsing, and adding it
+would make the meaning of a one-letter token depend on a whole-file analysis.
+
+### Decision
+
+`T`, `F`, `N`, and `U` cannot be bindings. A class, function, type alias, parameter,
+assignment target, `for`/comprehension target, `with ... as` name, `except ... as` name,
+`global`/`nonlocal` name, or import alias spelled with one of them is a parse error
+naming the collision. The literals themselves, and `N` as the `None` type shorthand,
+are unchanged.
+
+### Consequences
+
+- The error is raised in the parser, so every target and `myna targets` agree.
+- `python_to_myna` renames such Python bindings consistently (`class U` → `$U_`,
+  including keyword arguments and `__all__`) so the
+  `python -> myna -> python` contract in `test_roundtrip_corpus.py` still holds.
+- The alternative — treating the literals as shadowable — was rejected: it would make
+  `x = 1; T = 2; p(T)` depend on statement order for a one-character token.
