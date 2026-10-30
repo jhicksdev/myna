@@ -607,8 +607,11 @@ class TestMynaTypeScriptTarget(_JSTargetTests):
             )
 
         self.assertEqual(node_proc.returncode, 0, node_proc.stderr)
-        self.assertEqual(py_proc.returncode, 0, py_proc.stderr)
-        self.assertEqual(node_proc.stdout, py_proc.stdout)
+        # `$= Slug` emits a Python 3.12+ `type` statement; the TypeScript half and
+        # Node execution still run on 3.11, but the Python target cannot.
+        if sys.version_info >= (3, 12):
+            self.assertEqual(py_proc.returncode, 0, py_proc.stderr)
+            self.assertEqual(node_proc.stdout, py_proc.stdout)
         self.assertEqual(node_proc.stdout.splitlines(), ["[hello-world]", "3"])
 
     def test_ts_consumer_gets_exported_types(self):
