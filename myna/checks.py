@@ -97,7 +97,7 @@ def check_call_dict_shorthand(mod: ast.Module) -> None:
         raise CompileError(
             f"{display} declares **kwargs, but a trailing 'key: value' argument is a "
             f"dict literal; write keyword arguments as {name}(..., {example}=...) or "
-            f"pass the dict explicitly as {name}(..., {{{example}: ...}})",
+            f"splat a dict as {name}(..., **d)",
             line=node.line,
             col=node.col,
         )

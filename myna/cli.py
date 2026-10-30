@@ -40,7 +40,7 @@ def _print_runtime_traceback(exc: BaseException) -> None:
     """Print a runtime failure starting at the first `.myna` frame.
 
     The CLI and loader frames that ran the program are noise, and generated-code line
-    numbers no longer leak into the report (GAPS.md G12).
+    numbers no longer leak into the report (GAPS.md G11).
     """
     tb = exc.__traceback__
     start = tb
@@ -95,22 +95,13 @@ def cmd_compile(args: argparse.Namespace) -> int:
         # Relative imports become specifiers for sibling JavaScript files, so the
         # emitted extension follows the output file (Node treats `.mjs` as an ES
         # module).  TypeScript sources use the same `.js`/`.mjs` specifiers because
-        # `tsc` (NodeNext) resolves them to the generated `.ts` files. `--module-ext`
-        # overrides this for runners that need the source extension itself.
-        module_ext = args.module_ext or (
-            ".mjs" if output_suffix in (".mjs", ".mts") else ".js"
-        )
+        # `tsc` (NodeNext) maps them to the `.ts`/`.mts` sources and emits `.js`/`.mjs`.
+        module_ext = ".mjs" if output_suffix in (".mjs", ".mts") else ".js"
         if target == "js":
             code = myna_to_js(src, source_path=source_path, module_ext=module_ext)
         else:
             code = myna_to_ts(src, source_path=source_path, module_ext=module_ext)
     else:
-        if args.module_ext:
-            print(
-                "myna: --module-ext applies to the js and ts targets only",
-                file=sys.stderr,
-            )
-            return 1
         code = myna_to_python(src)
     if args.output:
         Path(args.output).write_text(code, encoding="utf-8")
@@ -412,13 +403,6 @@ def main(argv: list[str] | None = None) -> int:
     p_comp.add_argument("input", help="Input .myna file (or '-' for stdin)")
     p_comp.add_argument("-o", "--output", help="Output .py, .js, or .ts file (default: stdout)")
     p_comp.add_argument("-t", "--target", choices=["py", "js", "ts"], default=None, help="Target language: 'py' (default), 'js', or 'ts'")
-    p_comp.add_argument(
-        "--module-ext",
-        choices=[".js", ".mjs", ".ts", ".mts"],
-        default=None,
-        help="Extension for relative-import specifiers in js/ts output (default: derived "
-        "from -o: .ts/.mts output imports .js/.mjs, matching tsc's emitted files)",
-    )
     p_comp.set_defaults(func=cmd_compile)
 
     p_dec = sub.add_parser("decompile", aliases=["d", "py2myna"], help="Compress Python (.py) to Myna (.myna)")

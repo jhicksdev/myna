@@ -1,7 +1,7 @@
 """Map generated Python line numbers back to Myna source lines.
 
 `myna run` compiles Python whose line numbers are the *generated* ones, so a traceback used
-to point at a `.myna` file with the wrong line and the wrong excerpt (GAPS.md G12).
+to point at a `.myna` file with the wrong line and the wrong excerpt (GAPS.md G11).
 
 The Python backend can emit a marker comment before every statement (`sourcemap=True`,
 `# myna:42`). `split_markers` turns that into a generated-line -> Myna-line table and

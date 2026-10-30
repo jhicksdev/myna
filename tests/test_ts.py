@@ -601,42 +601,6 @@ class TestMynaTypeScriptTarget(_JSTargetTests):
         """
         self.assertEqual(self.run_ts(src), "8")
 
-    def test_compile_module_ext_override(self):
-        """`.mts` output imports `.mjs` by default; `--module-ext .mts` targets direct runs."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "theme.myna").write_text(
-                "@target(py, js)\n@x()->i => 1\n", encoding="utf-8"
-            )
-            (root / "main.myna").write_text(
-                "@target(py, js)\n<.theme:{x}\np(x())\n", encoding="utf-8"
-            )
-
-            def compile_with(*extra: str) -> str:
-                out = root / "main.mts"
-                proc = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "myna",
-                        "compile",
-                        "-t",
-                        "ts",
-                        "-o",
-                        str(out),
-                        *extra,
-                        str(root / "main.myna"),
-                    ],
-                    cwd=REPO_ROOT,
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertEqual(proc.returncode, 0, proc.stderr)
-                return out.read_text(encoding="utf-8")
-
-            self.assertIn('from "./theme.mjs"', compile_with())
-            self.assertIn('from "./theme.mts"', compile_with("--module-ext", ".mts"))
-
     def test_ts_relative_imports_typecheck_and_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

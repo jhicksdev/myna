@@ -221,9 +221,10 @@ no `@target(ts)`; `@target(js)` blocks are emitted for TypeScript. Type annotati
 **erased** and never add runtime checks.
 
 `myna run -t ts` compiles the reachable module graph to a temporary `.mts` tree and runs it
-with Bun, or with Node >= 22.6 (Node strips the types). Generated `.mts` files import their
-siblings as `./x.mjs` by default, matching what `tsc` emits and resolves; pass
-`--module-ext .mts` when the `.mts` files are executed directly rather than compiled.
+with Bun, or with Node >= 22.6 (Node strips the types). `myna compile -t ts` still emits
+sibling imports as `./x.mjs`, which `tsc` (NodeNext) maps to `x.mts` and Bun resolves too;
+only the runner's temporary tree names `.mts`, because it executes the files instead of
+compiling them.
 
 Annotations become TypeScript types where Myna has them:
 

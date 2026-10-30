@@ -39,8 +39,8 @@ to TypeScript (`Callable[[i], s]` → `(arg0: number) => string`, `Mapping[K,V]`
 `Record<K,V>`, `Sequence[T]` → `T[]`, `Awaitable[T]` → `Promise<T>`, `Self` → the
 enclosing class); user classes/aliases are not generic, so `Box[i]` becomes `Box`. There
 is no `@target(ts)`. `myna run -t ts` compiles a temporary `.mts` tree and runs it with Bun
-or Node >= 22.6; `myna compile -t ts --module-ext .mts` emits `.mts` import specifiers for
-direct execution (the default `.mjs` specifiers match what `tsc` emits).
+or Node >= 22.6. `myna compile -t ts` emits `.js`/`.mjs` import specifiers, which `tsc`
+(NodeNext) maps to the `.ts`/`.mts` sources and Bun resolves as well.
 
 ## 2. Complete Symbol Rosetta Stone
 

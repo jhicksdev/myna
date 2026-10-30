@@ -779,7 +779,7 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertIn("cannot be invoked without 'new'", plain.stderr)
 
     def test_quoted_module_names_import_scoped_packages(self):
-        """`<"@scope/pkg":{x}` names an npm package that Python cannot import (GAPS.md G11)."""
+        """`<"@scope/pkg":{x}` names an npm package that Python cannot import (GAPS.md G10)."""
         src = """
 @target(js)
 <"@opentui/core":{createCliRenderer}
@@ -814,7 +814,7 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertEqual(proc.stdout.strip(), "renderer")
 
     def test_cross_target_match_expression(self):
-        """`?? v { pat => expr }` in expression position (GAPS.md G13)."""
+        """`?? v { pat => expr }` in expression position (GAPS.md G12)."""
         src = """
 @tier(score:i)->s {
     base = 10

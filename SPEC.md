@@ -135,9 +135,11 @@ type alias is exported with `export type`; using a type alias as a value is a
 relative imports are present.
 
 `myna compile -t ts` derives import specifiers from `-o`: `.ts` output imports `./x.js`
-and `.mts` output imports `./x.mjs`, which is what `tsc` emits and resolves. Use
-`--module-ext .ts` (or `.mts`) when the generated files are executed directly instead of
-being compiled (`allowImportingTsExtensions` / `rewriteRelativeImportExtensions`, or Bun).
+and `.mts` output imports `./x.mjs`. That is correct for the `tsc` workflow — under
+`--module nodenext` / `--moduleResolution nodenext`, `tsc` maps a `./x.mjs` specifier to
+`x.mts` and emits `./x.mjs` — and for Bun. `myna run -t ts` is different only because it
+executes the `.mts` files without compiling them, so its temporary tree imports `.mts`
+directly.
 
 ---
 

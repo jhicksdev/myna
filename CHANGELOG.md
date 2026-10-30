@@ -21,8 +21,6 @@ language or CLI surface rather than fixes. Minor bump per `VERSIONING.md` §2.
   The Python target raises `TargetError`.
 - `myna run -t ts` compiles the reachable graph to a temporary `.mts` tree and executes it
   with Bun or Node >= 22.6. `DECISIONS.md` D-006 is amended accordingly.
-- `myna compile --module-ext {.js,.mjs,.ts,.mts}` overrides the extension used in
-  relative-import specifiers for `-t js`/`-t ts`; the default still follows `-o`.
 - `CompileError` (exported from `myna`) reports program-level problems found before code
   generation.
 
@@ -42,8 +40,12 @@ language or CLI surface rather than fixes. Minor bump per `VERSIONING.md` §2.
 
 ### Documentation
 
-- `SPEC.md` is v0.7 and documents `new`, the match expression, quoted module names,
-  `--module-ext`, and the call-site dict / `d$key` rules.
+- `SPEC.md` is v0.7 and documents `new`, the match expression, quoted module names, and the
+  call-site dict / `d$key` rules.
+- TypeScript import specifiers are unchanged, and `SPEC.md` now says why: `tsc` under
+  `--module nodenext` maps `./x.mjs` to `x.mts` and emits `./x.mjs`, and Bun resolves it
+  too. Only a tool that resolves the specifier literally against the filesystem would
+  care, which `myna run -t ts` sidesteps by naming `.mts` in its temporary tree.
 
 ## 0.6.1 (2026-10-29)
 

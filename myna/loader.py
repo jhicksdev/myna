@@ -59,7 +59,7 @@ def compile_myna_code(
     """Compile Myna source to a code object whose line numbers are Myna lines.
 
     Tracebacks then point at the `.myna` file, the right line, and the right excerpt
-    (GAPS.md G12).
+    (GAPS.md G11).
     """
     generated = _generate_python(
         source, path, relative_ceiling=relative_ceiling, sourcemap=True
