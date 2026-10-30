@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 import myna.ast_nodes as ast
+from myna.checks import check_call_dict_shorthand
 from myna.modules import (
     ModuleError,
     module_bindings,
@@ -1862,6 +1863,7 @@ def compile_to_js(
     ``--module-root`` case). ``module_ext`` is the extension of the generated files.
     """
     enforce_module_target(mod, "js")
+    check_call_dict_shorthand(mod)
     gen = JSGenerator(
         source_path=source_path, module_ext=module_ext, import_base=import_base
     )

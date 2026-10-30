@@ -14,6 +14,7 @@ from pathlib import Path
 
 from myna import (
     LANGUAGE_VERSION,
+    CompileError,
     DecompileError,
     LexError,
     ParseError,
@@ -312,7 +313,7 @@ def cmd_targets(args: argparse.Namespace) -> int:
         except TargetError as exc:
             print(f"{target:<9}: unsupported — {exc}")
             continue
-        except (LexError, ParseError, ValueError) as exc:
+        except (LexError, ParseError, CompileError, ValueError) as exc:
             print(f"{target:<9}: unsupported — {type(exc).__name__}: {exc}")
             continue
 
@@ -397,7 +398,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (LexError, ParseError, DecompileError, TargetError, BundleError, ModuleError, OSError) as exc:
+    except (
+        LexError,
+        ParseError,
+        CompileError,
+        DecompileError,
+        TargetError,
+        BundleError,
+        ModuleError,
+        OSError,
+    ) as exc:
         print(f"myna: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

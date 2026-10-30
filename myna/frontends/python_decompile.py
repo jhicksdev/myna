@@ -991,6 +991,17 @@ class PythonDecompiler:
         if isinstance(node, py_ast.Constant) and node.value is None:
             return "N"
 
+        if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
+            # Forward references and `from __future__ import annotations` leave quoted
+            # annotations; Myna has no quoted type syntax, so decompile the contents.
+            try:
+                parsed = py_ast.parse(node.value, mode="eval").body
+            except SyntaxError:
+                raise DecompileError(
+                    node, f"cannot represent the string annotation {node.value!r}"
+                ) from None
+            return self.dec_type(parsed)
+
         if isinstance(node, py_ast.Tuple):
             return f"({','.join(self.dec_type(e) for e in node.elts)})"
 

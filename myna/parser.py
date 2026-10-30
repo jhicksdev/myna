@@ -1587,6 +1587,7 @@ class Parser:
             self.pos += 1
             args: list[ast.Expr] = []
             keywords: list[tuple[Optional[str], ast.Expr]] = []
+            dict_shorthand = False
             self.skip_newlines()
             while not self.at(TT.RPAREN, TT.EOF):
                 self.skip_newlines()
@@ -1607,6 +1608,7 @@ class Parser:
                         if not self.match(TT.COMMA):
                             break
                     args.append(ast.DictExpr(keys=d_keys, values=d_vals, line=tok.line, col=tok.col))
+                    dict_shorthand = True
                     break
                 elif self.at(TT.IDENT) and self.peek().type == TT.EQ:
                     k_name = self.expect(TT.IDENT).value
@@ -1629,7 +1631,14 @@ class Parser:
                 if not self.match(TT.COMMA):
                     break
             self.expect(TT.RPAREN, "')' after arguments")
-            return ast.Call(func=left, args=args, keywords=keywords, line=left.line, col=left.col)
+            return ast.Call(
+                func=left,
+                args=args,
+                keywords=keywords,
+                dict_shorthand=dict_shorthand,
+                line=left.line,
+                col=left.col,
+            )
 
         # Subscript / Slice `a[i]`, `a[1:5:2]`, `a[1:, :2]`
         if tok.type == TT.LBRACK:

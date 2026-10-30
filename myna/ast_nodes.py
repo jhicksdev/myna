@@ -145,6 +145,7 @@ class Call(Expr):
     func: Expr = field(default_factory=Expr)
     args: list[Expr] = field(default_factory=list)
     keywords: list[tuple[Optional[str], Expr]] = field(default_factory=list)  # (name, val); name=None for **kwargs
+    dict_shorthand: bool = False  # a trailing `k: v` argument became a dict literal
 
 
 @dataclass

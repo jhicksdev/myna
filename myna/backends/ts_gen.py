@@ -22,6 +22,7 @@ from myna.backends.js_gen import (
     JSGenerator,
     js_ident,
 )
+from myna.checks import check_call_dict_shorthand
 from myna.modules import (
     ModuleError,
     module_bindings,
@@ -1025,6 +1026,7 @@ def compile_to_ts(
     extension of the emitted TypeScript file.
     """
     enforce_module_target(mod, "js", label="ts")
+    check_call_dict_shorthand(mod)
     gen = TSGenerator(
         source_path=source_path, module_ext=module_ext, import_base=import_base
     )

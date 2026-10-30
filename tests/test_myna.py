@@ -15,6 +15,7 @@ from myna import (
     DecompileError,
     LexError,
     ParseError,
+    CompileError,
     TargetError,
     compile_to_python,
     myna_to_js,
@@ -186,6 +187,34 @@ class TestMynaTranspiler(unittest.TestCase):
         ns = self.exec_myna(src)
         self.assertEqual(ns["pairs"], [(0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)])
         self.assertEqual(ns["merged"], {"a": 1, "b": 20, "c": 30})
+
+    def test_kwargs_callee_rejects_positional_dict_shorthand(self):
+        """`f(1, b: 2)` stays a dict, but a known `**kwargs` callee gets a diagnostic (G3)."""
+        src = """
+        @f(a:i, **x)->A { ^a }
+        @main { p(f(1, b: 2)) }
+        """
+        with self.assertRaises(CompileError) as ctx:
+            myna_to_python(src)
+        self.assertIn("declares **kwargs", str(ctx.exception))
+        self.assertIn("f(..., b=...)", str(ctx.exception))
+
+        # The documented forms still work, and the check only fires for known callees.
+        ns = self.exec_myna(
+            """
+        @g(a:i, **x)->A { ^x }
+        @takes_dict(a:i, d:{s:i})->i { ^a + d$b }
+        d = g(1, b=2)
+        e = takes_dict(1, b: 2)
+        """
+        )
+        self.assertEqual(ns["d"], {"b": 2})
+        self.assertEqual(ns["e"], 3)
+
+        imported = myna_to_python(
+            "@target(py)\n<helpers:{h}\np(h(1, b: 2))\n"
+        )
+        self.assertIn('h(1, {\'b\': 2})', imported)
 
     def test_high_density_shorthands(self):
         src = """

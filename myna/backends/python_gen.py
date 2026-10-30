@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import myna.ast_nodes as ast
+from myna.checks import check_call_dict_shorthand
 from myna.shorthands import BUILTIN_SHORTHANDS
 from myna.sourcemap import SOURCE_MARKER
 from myna.targets import enforce_module_target, expand_target_blocks
@@ -836,5 +837,6 @@ class PythonGenerator:
 
 def compile_to_python(mod: ast.Module, *, sourcemap: bool = False) -> str:
     enforce_module_target(mod, "py")
+    check_call_dict_shorthand(mod)
     gen = PythonGenerator(sourcemap=sourcemap)
     return gen.generate(expand_target_blocks(mod, "py"))
