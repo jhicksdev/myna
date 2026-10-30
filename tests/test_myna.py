@@ -1115,6 +1115,29 @@ def filter_items(items: list[Item], min_price: float) -> list[str]:
         items = [Item("Book", 20.0), Item("Pen", 2.0), Item("Laptop", 1000.0)]
         self.assertEqual(filter_items(items, 15.0), ["Book", "Laptop"])
 
+    def test_single_statement_loop_bodies_roundtrip(self):
+        """`for`/`while`/`with` one-statement bodies must not use the `=>` shorthand.
+
+        ``%x<-(xs)=>f(x)`` is a paren lambda, not a loop body, so the compact form had to
+        fall back to braces; this guards the emitted Myna against re-parse failures.
+        """
+        py_src = """
+def walk(xs):
+    for x in xs:
+        print(x)
+    while xs:
+        xs = xs[1:]
+    with open(__file__) as fh:
+        print(bool(fh))
+    return len(xs)
+"""
+        myna_code = python_to_myna(py_src, compact=True)
+        self.assertNotIn(")=>", myna_code.replace(" ", ""))
+        recompiled = myna_to_python(myna_code)
+        ns: dict = {}
+        exec(compile(recompiled, "<roundtrip>", "exec"), ns)
+        self.assertIn("walk", ns)
+
 
 if __name__ == "__main__":
     unittest.main()

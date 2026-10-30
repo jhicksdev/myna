@@ -832,15 +832,15 @@ class PythonDecompiler:
     def dec_for_stmt(self, stmt: py_ast.For | py_ast.AsyncFor) -> str:
         kw = "%~" if isinstance(stmt, py_ast.AsyncFor) else "%"
         tgt = self.dec_target(stmt.target)
-        res = f"{self.ind()}{kw}{tgt}<-{self.dec_expr(stmt.iter)}{self.dec_block(stmt.body)}"
+        res = f"{self.ind()}{kw}{tgt}<-{self.dec_expr(stmt.iter)}{self.dec_block(stmt.body, allow_arrow=False)}"
         if stmt.orelse:
-            res += f"%:{self.dec_block(stmt.orelse)}"
+            res += f"%:{self.dec_block(stmt.orelse, allow_arrow=False)}"
         return res
 
     def dec_while_stmt(self, stmt: py_ast.While) -> str:
-        res = f"{self.ind()}%?{self.dec_expr(stmt.test)}{self.dec_block(stmt.body)}"
+        res = f"{self.ind()}%?{self.dec_expr(stmt.test)}{self.dec_block(stmt.body, allow_arrow=False)}"
         if stmt.orelse:
-            res += f"%:{self.dec_block(stmt.orelse)}"
+            res += f"%:{self.dec_block(stmt.orelse, allow_arrow=False)}"
         return res
 
     def dec_try_stmt(self, stmt: py_ast.Try) -> str:
@@ -858,7 +858,7 @@ class PythonDecompiler:
         if stmt.orelse:
             res += f"!?{self.dec_block(stmt.orelse, allow_arrow=False)}"
         if stmt.finalbody:
-            res += f"!:{self.dec_block(stmt.finalbody)}"
+            res += f"!:{self.dec_block(stmt.finalbody, allow_arrow=False)}"
         return res
 
     def dec_with_stmt(self, stmt: py_ast.With | py_ast.AsyncWith) -> str:
@@ -870,7 +870,7 @@ class PythonDecompiler:
                 items.append(f"{self.dec_target(item.optional_vars)}={ctx}")
             else:
                 items.append(ctx)
-        return f"{self.ind()}{kw}{','.join(items)}{self.dec_block(stmt.body)}"
+        return f"{self.ind()}{kw}{','.join(items)}{self.dec_block(stmt.body, allow_arrow=False)}"
 
     # ========================================================================
     # Types
