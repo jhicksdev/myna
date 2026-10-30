@@ -1,4 +1,4 @@
-"""Word and sigil shorthands shared by the parser and the backends.
+"""Language-level name tables shared by the parser, the backends, and the decompiler.
 
 The parser accepts ``@name`` in expression position only for a name listed here; anything
 else is a declaration sigil and cannot appear inside an expression.
@@ -59,3 +59,8 @@ BUILTIN_SHORTHANDS = {
 SIGIL_SHORTHANDS = frozenset({"@u8", "@u8d"})
 
 EXPRESSION_SHORTHANDS = frozenset(BUILTIN_SHORTHANDS) | SIGIL_SHORTHANDS
+
+# Single-letter identifiers that parse as literals in Myna (`T`/`F` booleans, `N` None,
+# `U` undefined). They cannot be used as binding names: a class named `U` would be
+# shadowed by the literal at every use site.
+LITERAL_BINDING_NAMES = frozenset({"T", "F", "N", "U"})

@@ -1204,6 +1204,57 @@ def walk(xs):
         exec(compile(recompiled, "<roundtrip>", "exec"), ns)
         self.assertIn("walk", ns)
 
+    def test_reserved_literal_names_are_renamed_on_decompile(self):
+        """`class U` in Python must still round-trip now that `U` is a reserved literal."""
+        py_src = """
+class U:
+    def __init__(self, a):
+        self.a = a
+
+def f(U, k=1):
+    T = U.a
+    return T + k
+
+N = [1, 2]
+result = [f(U(x), k=2) for x in N]
+__all__ = ["f", "U"]
+"""
+        myna_code = python_to_myna(py_src, compact=True)
+        self.assertNotIn("$U{", myna_code)
+        ns: dict = {}
+        exec(compile(myna_to_python(myna_code), "<roundtrip>", "exec"), ns)
+        self.assertEqual(ns["result"], [3, 4])
+        self.assertEqual(ns["__all__"], ["f", "U_"])
+
+    def test_literal_names_cannot_be_binding_names(self):
+        """`T`/`F`/`N`/`U` are literals, so a binding named one of them is rejected (G1)."""
+        for src in (
+            "$$U(a:i)",
+            "$U { }",
+            "@U(a:i) => a",
+            "@f(T:i) => T",
+            "@make(a:i, N:i=1) => a",
+            "U = 1",
+            "T = 1",
+            "U: i = 1",
+            "%N<-(0..3) { p(1) }",
+            "[N] = [1]",
+            "[(a, F)] = [(1, 2)]",
+            "!&F=open('x') { _ }",
+            "!{ p(1) }!!U:ValueError => p(2)",
+            "$= U = i",
+        ):
+            with self.assertRaises(ParseError, msg=src) as ctx:
+                myna_to_python(src)
+            self.assertIn("reserved literal", str(ctx.exception), src)
+
+        # The literals themselves still work as values and as type shorthands.
+        ns = self.exec_myna("a = T\nb = F\nc = N\nd = U\ne: N = N\n")
+        self.assertIs(ns["a"], True)
+        self.assertIs(ns["b"], False)
+        self.assertIsNone(ns["c"])
+        self.assertIsNone(ns["d"])
+
 
 if __name__ == "__main__":
     unittest.main()

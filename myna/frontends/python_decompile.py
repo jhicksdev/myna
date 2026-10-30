@@ -4,6 +4,8 @@ from __future__ import annotations
 import ast as py_ast
 from typing import Optional
 
+from myna.shorthands import LITERAL_BINDING_NAMES
+
 
 class DecompileError(Exception):
     """Raised when a Python construct cannot be represented faithfully in Myna."""
@@ -462,6 +464,111 @@ class _LocalRenamer(py_ast.NodeTransformer):
         return node
         self.generic_visit(node)
         return node
+class _ReservedNameRenamer(py_ast.NodeTransformer):
+    """Rename Python bindings that collide with Myna's literal names.
+
+    `T`, `F`, `N`, and `U` are literals in Myna, so a Python module that binds one of them
+    (`class U`, `U = 1`, `def f(U)`) cannot round-trip unchanged. Every such binding is
+    renamed consistently (`U` -> `U_`) before decompilation, so the emitted Myna compiles.
+    """
+
+    def __init__(self, renames: dict[str, str]):
+        self.renames = renames
+
+    def _rename(self, name: Optional[str]) -> Optional[str]:
+        return self.renames.get(name, name) if name is not None else None
+
+    def visit_Name(self, node: py_ast.Name) -> py_ast.Name:
+        node.id = self._rename(node.id)
+        return node
+
+    def visit_arg(self, node: py_ast.arg) -> py_ast.arg:
+        node.arg = self._rename(node.arg)
+        return node
+
+    def visit_keyword(self, node: py_ast.keyword) -> py_ast.keyword:
+        node.arg = self._rename(node.arg)
+        self.generic_visit(node)
+        return node
+
+    def visit_FunctionDef(self, node: py_ast.FunctionDef) -> py_ast.FunctionDef:
+        node.name = self._rename(node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_AsyncFunctionDef(self, node: py_ast.AsyncFunctionDef) -> py_ast.AsyncFunctionDef:
+        node.name = self._rename(node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_ClassDef(self, node: py_ast.ClassDef) -> py_ast.ClassDef:
+        node.name = self._rename(node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_alias(self, node: py_ast.alias) -> py_ast.alias:
+        if node.asname is not None:
+            node.asname = self._rename(node.asname)
+        elif node.name in self.renames:
+            # `import U` / `from x import U`: the local binding is the imported name.
+            node.asname = self.renames[node.name]
+        return node
+
+    def visit_Global(self, node: py_ast.Global) -> py_ast.Global:
+        node.names = [self._rename(n) for n in node.names]
+        return node
+
+    def visit_Nonlocal(self, node: py_ast.Nonlocal) -> py_ast.Nonlocal:
+        node.names = [self._rename(n) for n in node.names]
+        return node
+
+    def visit_ExceptHandler(self, node: py_ast.ExceptHandler) -> py_ast.ExceptHandler:
+        node.name = self._rename(node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_MatchAs(self, node):
+        node.name = self._rename(node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_MatchStar(self, node):
+        node.name = self._rename(node.name)
+        return node
+
+    def visit_MatchMapping(self, node):
+        node.rest = self._rename(node.rest)
+        self.generic_visit(node)
+        return node
+
+    def visit_Assign(self, node: py_ast.Assign) -> py_ast.Assign:
+        if any(isinstance(t, py_ast.Name) and t.id == "__all__" for t in node.targets):
+            if isinstance(node.value, (py_ast.List, py_ast.Tuple)):
+                for elt in node.value.elts:
+                    if isinstance(elt, py_ast.Constant) and elt.value in self.renames:
+                        elt.value = self.renames[elt.value]
+        self.generic_visit(node)
+        return node
+
+
+def _rename_reserved_names(tree: py_ast.Module) -> None:
+    """Apply `_ReservedNameRenamer` when the module binds a Myna literal name."""
+    found: set[str] = set()
+    for node in py_ast.walk(tree):
+        if isinstance(node, py_ast.Name) and node.id in LITERAL_BINDING_NAMES:
+            found.add(node.id)
+        elif isinstance(node, (py_ast.FunctionDef, py_ast.AsyncFunctionDef, py_ast.ClassDef)) and node.name in LITERAL_BINDING_NAMES:
+            found.add(node.name)
+        elif isinstance(node, py_ast.arg) and node.arg in LITERAL_BINDING_NAMES:
+            found.add(node.arg)
+        elif isinstance(node, py_ast.alias) and (node.asname or node.name) in LITERAL_BINDING_NAMES:
+            found.add(node.asname or node.name)
+    if not found:
+        return
+    _ReservedNameRenamer({name: name + "_" for name in found}).visit(tree)
+    py_ast.fix_missing_locations(tree)
+
+
 class PythonDecompiler:
     def __init__(self, compact: bool = True, minify_locals: bool = False):
         self.compact = compact
@@ -475,6 +582,7 @@ class PythonDecompiler:
 
     def decompile(self, source: str) -> str:
         tree = py_ast.parse(source)
+        _rename_reserved_names(tree)
         if self.compact:
             _DeadLocalInliner().visit(tree)
             _LocalRenamer(tree, preserve_public=not self.minify_locals).visit(tree)

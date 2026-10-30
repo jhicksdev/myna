@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from myna.lexer import TT, LexError, Token, decode_escape, tokenize
-from myna.shorthands import EXPRESSION_SHORTHANDS
+from myna.shorthands import EXPRESSION_SHORTHANDS, LITERAL_BINDING_NAMES
 from myna.targets import VALID_TARGETS
 import myna.ast_nodes as ast
 
@@ -366,6 +366,7 @@ class Parser:
             is_async = True
 
         name_tok = self.expect(TT.IDENT, "function name")
+        self._reject_literal_binding(name_tok)
         name = name_tok.value
         if name == "init" and method_kind == "normal":
             method_kind = "init"
@@ -420,7 +421,9 @@ class Parser:
                 self.skip_newlines()
                 continue
 
-            p_name = self.expect(TT.IDENT, "parameter name").value
+            p_tok = self.expect(TT.IDENT, "parameter name")
+            self._reject_literal_binding(p_tok)
+            p_name = p_tok.value
             type_ann: Optional[ast.TypeNode] = None
             default: Optional[ast.Expr] = None
 
@@ -443,7 +446,9 @@ class Parser:
         if exported and self.match(TT.DOLLAR):
             is_dataclass = True
 
-        name = self.expect(TT.IDENT, "class name").value
+        name_tok = self.expect(TT.IDENT, "class name")
+        self._reject_literal_binding(name_tok)
+        name = name_tok.value
         fields: list[ast.Param] = []
         bases: list[ast.Expr] = []
 
@@ -478,23 +483,33 @@ class Parser:
 
     def parse_type_alias(self) -> ast.TypeAliasStmt:
         tok = self.expect(TT.DOLLAR_EQ)
-        name = self.expect(TT.IDENT, "type alias name").value
+        alias_tok = self.expect(TT.IDENT, "type alias name")
+        self._reject_literal_binding(alias_tok)
+        name = alias_tok.value
         self.expect(TT.EQ, "'=' in type alias")
         val = self.parse_type()
         return ast.TypeAliasStmt(name=name, value=val, line=tok.line, col=tok.col)
 
     def parse_global_stmt(self) -> ast.ScopeStmt:
         tok = self.expect(TT.AT_EQ)
-        names = [self.expect(TT.IDENT, "variable name").value]
+        first_tok = self.expect(TT.IDENT, "variable name")
+        self._reject_literal_binding(first_tok)
+        names = [first_tok.value]
         while self.match(TT.COMMA):
-            names.append(self.expect(TT.IDENT, "variable name").value)
+            tok_name = self.expect(TT.IDENT, "variable name")
+            self._reject_literal_binding(tok_name)
+            names.append(tok_name.value)
         return ast.ScopeStmt(kind="global", names=names, line=tok.line, col=tok.col)
 
     def parse_nonlocal_stmt(self) -> ast.ScopeStmt:
         tok = self.expect(TT.CARET_EQ)
-        names = [self.expect(TT.IDENT, "variable name").value]
+        first_tok = self.expect(TT.IDENT, "variable name")
+        self._reject_literal_binding(first_tok)
+        names = [first_tok.value]
         while self.match(TT.COMMA):
-            names.append(self.expect(TT.IDENT, "variable name").value)
+            tok_name = self.expect(TT.IDENT, "variable name")
+            self._reject_literal_binding(tok_name)
+            names.append(tok_name.value)
         return ast.ScopeStmt(kind="nonlocal", names=names, line=tok.line, col=tok.col)
 
     def parse_if_stmt(self) -> ast.IfStmt:
@@ -641,7 +656,9 @@ class Parser:
                     if self.match(TT.COLON):
                         exc_type = self.parse_expr(stop_before_lbrace=True)
                     elif self.at(TT.IDENT) and self.peek().type in (TT.COLON, TT.LBRACE, TT.FAT_ARROW):
-                        name = self.expect(TT.IDENT).value
+                        name_tok = self.expect(TT.IDENT)
+                        self._reject_literal_binding(name_tok)
+                        name = name_tok.value
                         if self.match(TT.COLON):
                             exc_type = self.parse_expr(stop_before_lbrace=True)
                         else:
@@ -702,6 +719,7 @@ class Parser:
             first = self.parse_expr(stop_before_lbrace=True)
             if self.match(TT.EQ):
                 ctx_expr = self.parse_expr(stop_before_lbrace=True)
+                self._reject_literal_targets(first)
                 items.append(ast.WithItem(context_expr=ctx_expr, optional_vars=first))
             else:
                 items.append(ast.WithItem(context_expr=first, optional_vars=None))
@@ -788,6 +806,7 @@ class Parser:
 
         # Typed assignment: `x: i = 1`
         if self.match(TT.COLON):
+            self._reject_literal_targets(first)
             type_ann = self.parse_type()
             self.expect(TT.EQ, "'=' in typed assignment")
             val = self.parse_expr_list()
@@ -798,14 +817,56 @@ class Parser:
             op_tok = self.cur()
             op_str = AUG_ASSIGN_TOKENS[op_tok.type]
             self.pos += 1
+            self._reject_literal_targets(first)
             targets = [first]
             rhs = self.parse_expr_list()
             while op_str == "=" and self.match(TT.EQ):
+                self._reject_literal_targets(rhs)
                 targets.append(rhs)
                 rhs = self.parse_expr_list()
             return ast.AssignStmt(targets=targets, value=rhs, type_ann=None, op=op_str, line=tok.line, col=tok.col)
 
         return ast.ExprStmt(expr=first, line=tok.line, col=tok.col)
+
+    def _reject_literal_binding(self, tok: Token) -> None:
+        """Reject `T`/`F`/`N`/`U` as binding names (GAPS.md G1).
+
+        These identifiers parse as literals at every use site, so a binding with one of
+        those names compiles to something else entirely (`$$U` + `U(1)` became `None(1)`).
+        """
+        if tok.value in LITERAL_BINDING_NAMES:
+            raise ParseError(
+                f"'{tok.value}' is a reserved literal and cannot be a binding name; "
+                f"rename it (for example '{tok.value}_')",
+                tok,
+            )
+
+    _LITERAL_KIND_NAMES = {"bool": ("T", "F"), "none": ("N",), "undefined": ("U",)}
+
+    def _reject_literal_targets(self, node: ast.Expr) -> None:
+        """Check the names an assignment-like target binds.
+
+        A target such as `T = 1` has already been parsed as a literal by the time the
+        assignment is recognised, so both the `Ident` and literal spellings are checked.
+        """
+        if isinstance(node, ast.Ident):
+            self._reject_literal_binding(
+                Token(TT.IDENT, node.name, node.line, node.col, "")
+            )
+            return
+        if isinstance(node, ast.Literal):
+            names = self._LITERAL_KIND_NAMES.get(node.kind)
+            if names:
+                name = names[0] if not isinstance(node.value, bool) else names[node.value is False]
+                raise ParseError(
+                    f"'{name}' is a reserved literal and cannot be a binding name; "
+                    f"rename it (for example '{name}_')",
+                    Token(TT.IDENT, name, node.line, node.col, ""),
+                )
+            return
+        if isinstance(node, (ast.TupleExpr, ast.ListExpr)):
+            for elt in node.elts:
+                self._reject_literal_targets(elt)
 
     def parse_target_list(self) -> ast.Expr:
         first = self.parse_expr(min_bp=35, stop_before_lbrace=True)
@@ -815,8 +876,11 @@ class Parser:
                 elts.append(self.parse_expr(min_bp=35, stop_before_lbrace=True))
                 if not self.match(TT.COMMA):
                     break
-            return ast.TupleExpr(elts=elts, line=first.line, col=first.col)
-        return first
+            target = ast.TupleExpr(elts=elts, line=first.line, col=first.col)
+        else:
+            target = first
+        self._reject_literal_targets(target)
+        return target
 
     def parse_expr_list(self) -> ast.Expr:
         first = self.parse_expr()
