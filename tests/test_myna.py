@@ -16,9 +16,11 @@ from myna import (
     LexError,
     ParseError,
     TargetError,
+    compile_to_python,
     myna_to_js,
     myna_to_python,
     myna_to_ts,
+    parse,
     python_to_myna,
 )
 
@@ -224,6 +226,18 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["y"], 8)
         self.assertEqual(ns["z"], 7)
         self.assertEqual(ns["__all__"], ["exported"])
+
+    def test_bare_raise_before_a_compound_clause(self):
+        """`=>!^` followed by `!!`, `%:` or `:?` must read as a bare raise, not an expression."""
+        py_code = myna_to_python(
+            "@target(py)\n"
+            "!{ p(1) }!!:SystemExit=>!^!!e:Exception{p(e)}\n"
+        )
+        self.assertIn("except SystemExit:\n    raise", py_code)
+
+        ns: dict = {}
+        exec(py_code, ns)
+        self.assertIn("__builtins__", ns)
 
     def test_hyphenated_dict_keys_require_quotes(self):
         """`{Content-Type: ...}` is subtraction, so it must be a diagnostic (GAPS.md G5)."""
@@ -801,6 +815,38 @@ class TestMynaTranspiler(unittest.TestCase):
             )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), "15")
+
+    def test_run_tracebacks_report_myna_lines(self):
+        """A runtime failure must point at the `.myna` line and Myna source (GAPP.md G12)."""
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "lib.myna").write_text(
+                "@target(py)\n@boom() {\n  x = 1\n  ^x.y\n}\n", encoding="utf-8"
+            )
+            (root / "main.myna").write_text(
+                "@target(py)\n<.lib:{boom}\n\n@main {\n  boom()\n}\n", encoding="utf-8"
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(root / "main.myna")],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn('File "{}", line 5'.format(root / "main.myna"), proc.stderr)
+        self.assertIn('File "{}", line 4'.format(root / "lib.myna"), proc.stderr)
+        self.assertIn("^x.y", proc.stderr)
+        self.assertIn("AttributeError: 'int' object has no attribute 'y'", proc.stderr)
+        # Frames from the CLI/loader that ran the program are not user code.
+        self.assertNotIn("cli.py", proc.stderr)
+        self.assertNotIn("loader.py", proc.stderr)
+
+    def test_compile_output_has_no_source_markers(self):
+        src = "$$D(xs:[s]=[])\n@f(x:i)->i {\n  y = x + 1\n  ^y\n}\n"
+        self.assertNotIn("# myna:", myna_to_python(src))
+        self.assertIn("# myna:", myna_to_python(src, sourcemap=True))
+        self.assertIn("# myna:", compile_to_python(parse(src), sourcemap=True))
 
     def _write_deep_entry_layout(self, root: pathlib.Path) -> pathlib.Path:
         """A `tests/` entry that reaches a sibling `src/` with `..` (GAPS.md G14)."""

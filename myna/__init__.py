@@ -13,10 +13,14 @@ __version__ = "0.6.0"
 LANGUAGE_VERSION = ".".join(__version__.split(".")[:2])
 
 
-def myna_to_python(source: str) -> str:
-    """Compile Myna source code to Python 3.12+ source code."""
+def myna_to_python(source: str, *, sourcemap: bool = False) -> str:
+    """Compile Myna source code to Python 3.12+ source code.
+
+    ``sourcemap=True`` prefixes every emitted statement with a ``# myna:LINE`` marker so
+    a caller can build a generated-line -> Myna-line table (`myna.sourcemap`).
+    """
     ast_mod = parse(source)
-    return compile_to_python(ast_mod)
+    return compile_to_python(ast_mod, sourcemap=sourcemap)
 
 
 def myna_to_js(

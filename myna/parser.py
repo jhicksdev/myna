@@ -37,6 +37,16 @@ AUG_ASSIGN_TOKENS = {
 
 STMT_TERMINATORS = {TT.NEWLINE, TT.SEMI, TT.RBRACE, TT.EOF}
 
+# Tokens that continue the enclosing compound statement and therefore end a `=>` body:
+# `%:`/`%?` (loop else), `!!`/`!:!`/`!?` (try clauses), `:?` (elif).
+BLOCK_CONTINUATIONS = {
+    TT.PCT_COLON,
+    TT.BANG_BANG,
+    TT.BANG_COLON,
+    TT.BANG_QMARK,
+    TT.COLON_QMARK,
+}
+
 
 class Parser:
     def __init__(self, tokens: list[Token]):
@@ -693,7 +703,7 @@ class Parser:
 
     def parse_raise_stmt(self) -> ast.RaiseStmt:
         tok = self.expect(TT.BANG_CARET)
-        if self.at_stmt_end():
+        if self.at_stmt_end() or self.cur().type in BLOCK_CONTINUATIONS:
             return ast.RaiseStmt(exc=None, cause=None, line=tok.line, col=tok.col)
         exc = self.parse_expr()
         cause: Optional[ast.Expr] = None

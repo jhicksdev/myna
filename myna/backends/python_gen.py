@@ -5,6 +5,7 @@ from typing import Optional
 
 import myna.ast_nodes as ast
 from myna.shorthands import BUILTIN_SHORTHANDS
+from myna.sourcemap import SOURCE_MARKER
 from myna.targets import enforce_module_target, expand_target_blocks
 
 
@@ -21,8 +22,11 @@ TYPE_SHORTHANDS = {
 
 
 class PythonGenerator:
-    def __init__(self, indent_str: str = "    "):
+    def __init__(self, indent_str: str = "    ", *, sourcemap: bool = False):
         self.indent_str = indent_str
+        # When set, every emitted statement is prefixed with a `# myna:LINE` marker so a
+        # caller can build a generated-line -> Myna-line table (`myna.sourcemap`).
+        self.sourcemap = sourcemap
         self.indent_level = 0
         self.in_class = False
         self.receiver_name = "self"
@@ -100,6 +104,11 @@ class PythonGenerator:
     # ========================================================================
 
     def gen_stmt(self, stmt: ast.Stmt) -> list[str]:
+        if self.sourcemap:
+            return [f"{self.ind()}{SOURCE_MARKER}{stmt.line}", *self._gen_stmt(stmt)]
+        return self._gen_stmt(stmt)
+
+    def _gen_stmt(self, stmt: ast.Stmt) -> list[str]:
         if isinstance(stmt, ast.NoopStmt):
             return [f"{self.ind()}pass"]
 
@@ -825,7 +834,7 @@ class PythonGenerator:
         }.get(op, 50)
 
 
-def compile_to_python(mod: ast.Module) -> str:
+def compile_to_python(mod: ast.Module, *, sourcemap: bool = False) -> str:
     enforce_module_target(mod, "py")
-    gen = PythonGenerator()
+    gen = PythonGenerator(sourcemap=sourcemap)
     return gen.generate(expand_target_blocks(mod, "py"))

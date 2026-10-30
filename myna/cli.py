@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import traceback
 import types
 import uuid
 from pathlib import Path
@@ -27,9 +28,22 @@ from myna import (
 import myna.ast_nodes as ast
 from myna.bundler import BundleError, bundle, bundle_zipapp
 from myna.js_modules import collect_js_modules, write_js_tree
-from myna.loader import compile_myna_source, install
+from myna.loader import compile_myna_code, install
 from myna.modules import ModuleError
 from myna.targets import expand_target_blocks
+
+
+def _print_runtime_traceback(exc: BaseException) -> None:
+    """Print a runtime failure starting at the first `.myna` frame.
+
+    The CLI and loader frames that ran the program are noise, and generated-code line
+    numbers no longer leak into the report (GAPS.md G12).
+    """
+    tb = exc.__traceback__
+    start = tb
+    while start is not None and not start.tb_frame.f_code.co_filename.endswith(".myna"):
+        start = start.tb_next
+    traceback.print_exception(type(exc), exc, start or tb, file=sys.stderr)
 
 
 def count_tokens(text: str) -> tuple[int, str]:
@@ -161,7 +175,7 @@ def _run_python_entry(
 
     finder = install(package, root)
     try:
-        py_code = compile_myna_source(
+        code = compile_myna_code(
             src, entry, relative_ceiling=1 if module_root is not None else None
         )
         globs = {
@@ -171,7 +185,7 @@ def _run_python_entry(
         }
         sys.argv = [str(src_path)] + list(script_args)
         try:
-            exec(compile(py_code, str(src_path), "exec"), globs)
+            exec(code, globs)
         except ImportError as exc:
             message = _relative_missing_message(package, exc, root)
             if message is None:
@@ -385,6 +399,13 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args)
     except (LexError, ParseError, DecompileError, TargetError, BundleError, ModuleError, OSError) as exc:
         print(f"myna: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    except SystemExit:
+        raise
+    except BaseException as exc:  # a failing program, not a compiler error
+        _print_runtime_traceback(exc)
         return 1
 
 
