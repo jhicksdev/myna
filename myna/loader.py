@@ -20,15 +20,25 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from myna import myna_to_python
+from myna.backends.python_gen import compile_to_python
 from myna.lexer import LexError
-from myna.parser import ParseError
+from myna.modules import clamp_relative_levels
+from myna.parser import ParseError, parse
 
 
-def compile_myna_source(source: str, path: Path) -> str:
-    """Compile Myna source, attributing lex/parse errors to the originating file."""
+def compile_myna_source(
+    source: str, path: Path, *, relative_ceiling: int | None = None
+) -> str:
+    """Compile Myna source, attributing lex/parse errors to the originating file.
+
+    ``relative_ceiling`` caps relative-import levels before generation, which the Python
+    entry needs when it runs under ``--module-root`` (see `clamp_relative_levels`).
+    """
     try:
-        return myna_to_python(source)
+        tree = parse(source)
+        if relative_ceiling is not None:
+            clamp_relative_levels(tree, relative_ceiling)
+        return compile_to_python(tree)
     except LexError as exc:
         raise LexError(exc.msg, exc.line, exc.col, filename=str(path)) from exc
     except ParseError as exc:

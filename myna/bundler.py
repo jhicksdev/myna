@@ -21,6 +21,7 @@ from typing import Iterator
 import myna.ast_nodes as ast
 from myna.backends.python_gen import compile_to_python
 from myna.lexer import LexError
+from myna.modules import clamp_relative_levels
 from myna.parser import ParseError, parse
 from myna.targets import expand_target_blocks
 
@@ -93,15 +94,20 @@ def _package_parts(module_name: str, is_package: bool) -> list[str]:
 
 
 def _resolve_import(
-    current: str, is_package: bool, node: ast.ImportFromStmt
+    current: str, is_package: bool, node: ast.ImportFromStmt, *, ceiling: bool = False
 ) -> tuple[list[str], list[list[str]]]:
     """Resolve one relative import to its module path plus optional submodule candidates."""
     package = _package_parts(current, is_package)
     keep = len(package) - (node.level - 1)
     if keep < 0:
-        raise BundleError(
-            f"relative import at line {node.line} goes above the bundle root"
-        )
+        if ceiling and current == "":
+            # A declared bundle root is a ceiling for the entry, matching `myna run`
+            # and `myna.modules.module_base` (GAPS.md G14).
+            keep = 0
+        else:
+            raise BundleError(
+                f"relative import at line {node.line} goes above the bundle root"
+            )
     base = package[:keep]
     if node.module:
         base = base + node.module.split(".")
@@ -128,6 +134,9 @@ def _collect(
         seen.add(source_path)
 
         tree = _parse_module(source_path)
+        if not name and module_root is not None:
+            # The declared root is the entry's ceiling; `..src.x` and `.src.x` agree.
+            clamp_relative_levels(tree, 1)
         code = compile_to_python(tree)
         if name:
             modules[name] = BundleModule(name, source_path, code, is_package)
@@ -139,7 +148,9 @@ def _collect(
             if not isinstance(node, ast.ImportFromStmt) or node.level == 0:
                 continue
             try:
-                base, extras = _resolve_import(name, is_package, node)
+                base, extras = _resolve_import(
+                    name, is_package, node, ceiling=module_root is not None
+                )
             except BundleError as exc:
                 raise BundleError(f"{source_path}: {exc}") from exc
             for index, parts in enumerate([base, *extras]):

@@ -161,7 +161,9 @@ def _run_python_entry(
 
     finder = install(package, root)
     try:
-        py_code = compile_myna_source(src, entry)
+        py_code = compile_myna_source(
+            src, entry, relative_ceiling=1 if module_root is not None else None
+        )
         globs = {
             "__name__": "__main__",
             "__file__": str(entry),

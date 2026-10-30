@@ -706,6 +706,107 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), "hey!")
 
+    def test_relative_dotted_module_import_emits_submodule_form(self):
+        src = "@target(py)\n<.pkg.mod\n<.pkg.other>o\n"
+        py_code = myna_to_python(src)
+        self.assertIn("from .pkg import mod", py_code)
+        self.assertIn("from .pkg import other as o", py_code)
+        self.assertNotIn("from . import pkg.mod", py_code)
+        compile(py_code, "<generated>", "exec")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "pkg").mkdir()
+            (root / "pkg" / "mod.myna").write_text(
+                "@target(py)\n@v()->i { ^7 }\n", encoding="utf-8"
+            )
+            (root / "pkg" / "other.myna").write_text(
+                "@target(py)\n@w()->i { ^8 }\n", encoding="utf-8"
+            )
+            (root / "main.myna").write_text(
+                "@target(py)\n<.pkg.mod\n<.pkg.other>o\n@main { p(mod.v() + o.w()) }\n",
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(root / "main.myna")],
+                cwd=pathlib.Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "15")
+
+    def _write_deep_entry_layout(self, root: pathlib.Path) -> pathlib.Path:
+        """A `tests/` entry that reaches a sibling `src/` with `..` (GAPS.md G14)."""
+        (root / "src").mkdir()
+        (root / "tests").mkdir()
+        (root / "src" / "util.myna").write_text(
+            '@target(py)\n@bang(s:s)->s => s + "!"\n', encoding="utf-8"
+        )
+        (root / "tests" / "helper.myna").write_text(
+            "@target(py)\n<..src.util:{bang}\n@shout(s:s)->s => bang(s).upper()\n",
+            encoding="utf-8",
+        )
+        entry = root / "tests" / "run.myna"
+        entry.write_text(
+            "@target(py)\n"
+            "<..src.util:{bang}\n"
+            "<.tests.helper:{shout}\n"
+            'p(bang("a"))\n'
+            'p(shout("b"))\n',
+            encoding="utf-8",
+        )
+        return entry
+
+    def test_module_root_is_the_ceiling_for_a_nested_entry(self):
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            entry = self._write_deep_entry_layout(root)
+
+            def myna(*args: str):
+                return subprocess.run(
+                    [sys.executable, "-m", "myna", *args],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                )
+
+            direct = myna("run", "--module-root", str(root), str(entry))
+            script = myna(
+                "bundle", "--module-root", str(root), str(entry), "-o", str(root / "app.py")
+            )
+            zipapp = myna(
+                "bundle",
+                "--zipapp",
+                "--module-root",
+                str(root),
+                str(entry),
+                "-o",
+                str(root / "app.pyz"),
+            )
+            bundled = subprocess.run(
+                [sys.executable, "-I", str(root / "app.py")],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+            )
+            packed = subprocess.run(
+                [sys.executable, "-I", str(root / "app.pyz")],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+            )
+            without_root = myna("run", str(entry))
+
+        for proc in (direct, bundled, packed):
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["a!", "B!"])
+        for proc in (script, zipapp):
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        # Without a declared root `..` still cannot climb out of the entry's package.
+        self.assertEqual(without_root.returncode, 1)
+
     def _write_src_tests_layout(self, root: pathlib.Path) -> None:
         src = root / "src"
         tests = root / "tests"

@@ -19,6 +19,7 @@ same conventions but keep their own import-machinery integration.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -76,20 +77,43 @@ def find_module(base: Path, parts: list[str]) -> FoundModule | None:
 def module_base(current_path: Path, level: int, root: Path | None = None) -> Path:
     """Return the directory a relative import of ``level`` resolves against.
 
-    ``root`` replaces the importing module's directory for a program's entry file. A
-    relative import may not climb above an explicitly supplied root.
+    ``root`` replaces the importing module's directory and also becomes the ceiling: an
+    import that would climb above it resolves from the root, so a nested entry such as
+    ``tests/run.myna --module-root .`` can reach ``..src.util``. Without a root, climbing
+    above the filesystem root is an error.
     """
     if level < 1:
         raise ValueError("module_base() requires a relative import level >= 1")
     base = root if root is not None else current_path.parent
     for _ in range(level - 1):
+        if root is not None and base == root:
+            break
         parent = base.parent
         if parent == base:
             raise ModuleError("relative import goes above the filesystem root")
-        if root is not None and base == root:
-            raise ModuleError("relative import goes above the module root")
         base = parent
     return base
+
+
+def clamp_relative_levels(node, ceiling: int = 1) -> None:
+    """Cap relative-import levels at ``ceiling`` anywhere in a Myna AST.
+
+    The Python target emits Python relative imports, which cannot climb out of their own
+    package, so an entry module run under ``--module-root`` has its levels capped at the
+    root — the same ceiling `module_base` applies when resolving for the other targets.
+    """
+    if isinstance(node, list):
+        for item in node:
+            clamp_relative_levels(item, ceiling)
+        return
+    if not dataclasses.is_dataclass(node):
+        return
+    if isinstance(node, (ast.ImportStmt, ast.ImportFromStmt)):
+        node.level = min(node.level, ceiling)
+    for field in dataclasses.fields(node):
+        value = getattr(node, field.name)
+        if isinstance(value, list) or dataclasses.is_dataclass(value):
+            clamp_relative_levels(value, ceiling)
 
 
 def _current_package(current_path: Path, root: Path | None = None) -> FoundModule:

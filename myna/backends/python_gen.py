@@ -166,7 +166,7 @@ class PythonGenerator:
         if isinstance(stmt, ast.ImportStmt):
             parts = [f"{a.name} as {a.asname}" if a.asname else a.name for a in stmt.names]
             if stmt.level:
-                return [f"{self.ind()}from {'.' * stmt.level} import {', '.join(parts)}"]
+                return self._gen_relative_module_imports(stmt)
             return [f"{self.ind()}import {', '.join(parts)}"]
 
         if isinstance(stmt, ast.ImportFromStmt):
@@ -247,6 +247,26 @@ class PythonGenerator:
                 res.extend(self.gen_stmt(s))
         self.indent_level -= 1
         return res
+
+    def _gen_relative_module_imports(self, stmt: ast.ImportStmt) -> list[str]:
+        """Lower a relative module-object import (``<.pk.mod``).
+
+        ``from . import pk.mod`` is not valid Python, so a dotted name becomes
+        ``from .pk import mod``; plain names keep the ``from . import a, b`` form.
+        """
+        dots = "." * stmt.level
+        plain = [f"{a.name} as {a.asname}" if a.asname else a.name
+                 for a in stmt.names if "." not in a.name]
+        lines: list[str] = []
+        if plain:
+            lines.append(f"{self.ind()}from {dots} import {', '.join(plain)}")
+        for alias in stmt.names:
+            if "." not in alias.name:
+                continue
+            parent, _, leaf = alias.name.rpartition(".")
+            asname = f" as {alias.asname}" if alias.asname else ""
+            lines.append(f"{self.ind()}from {dots}{parent} import {leaf}{asname}")
+        return lines
 
     def gen_func_def(self, fn: ast.FuncDef) -> list[str]:
         if fn.exported and self.indent_level == 0:
