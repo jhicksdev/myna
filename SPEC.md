@@ -1,4 +1,4 @@
-# Myna Language Specification (v0.5)
+# Myna Language Specification (v0.6)
 
 **Myna** is an ultra-dense, symbol-based, AI-native programming language designed to minimize LLM token consumption while mapping 1-to-1 onto the semantics of **Python 3.12+** (normative) and a portable subset of **JavaScript (ES2024+)** and **TypeScript**.
 
@@ -61,10 +61,21 @@ escapes as raw byte values, and reject `\u`, `\U`, and `\N`.
 | `{T}` | `set[T]` | `Set<T>` |
 | `(T1, T2)` | `tuple[T1, T2]` | `[T1, T2]` |
 
-`T?` appends `| null`. A list of a union is parenthesized (`(A | B)[]`). A dictionary
-whose key type is not a valid `Record` key (`string`, `number`, `symbol`, or a union of
-those) is emitted as `Record<string, V>`, matching JavaScript's string-coerced keys.
-JavaScript strips all annotations; TypeScript emits them.
+`T?` appends `| null`. A list of a union or function type is parenthesized
+(`(A | B)[]`, `((x: A) => B)[]`). A dictionary whose key type is not a valid `Record` key
+(`string`, `number`, `symbol`, or a union of those) is emitted as `Record<string, V>`,
+matching JavaScript's string-coerced keys.
+
+The TypeScript target also translates Python `typing`/`collections.abc` annotations:
+`Callable[[T], R]` (or `Callable[(T1, T2), R]`) becomes `(arg0: T, ...) => R`,
+`Mapping[K, V]` becomes `Record<K, V>`, `Sequence[T]` becomes `T[]`, `Iterator[T]`
+becomes `Iterable<T>`, `Awaitable[T]` becomes `Promise<T>`,
+`Generator[Y, S, R]` becomes `Generator<Y, R, S>`, `Type[T]` becomes
+`new (...args: any[]) => T`, and `Self` resolves to the enclosing class. `ClassVar[T]`,
+`Final[T]`, `Annotated[T, ...]`, `Required[T]`, and `NotRequired[T]` erase to `T`; an
+unknown `typing.*` name becomes `any`. Myna has no generic declarations, so type
+arguments on a user class or alias are erased (`Box[int]` becomes `Box`). JavaScript
+strips all annotations; TypeScript emits them.
 
 ---
 
@@ -83,15 +94,15 @@ JavaScript strips all annotations; TypeScript emits them.
 | `<numpy>np` | `import numpy as np` | `import * as np from 'numpy';` |
 | `<pathlib:{Path, PurePath>PP}` | `from pathlib import Path, PurePath as PP` | `import { Path, PurePath as PP } from 'pathlib';` |
 | `<.utils:{helper}` | `from .utils import helper` | `import { helper } from './utils.js';` |
-| `@target(py)` / `@target(py, js)` | module target contract (default: both) | same (`js` also permits `-t ts`; there is no `@target(ts)`) |
+| `@target(py)` / `@target(py, js)` | module target contract (default: `py`) | same (`js` also permits `-t ts`; there is no `@target(ts)`) |
 | `@target(py) { ... }` | compile-time block, emitted only for Python | same (module-level only, imports become top-level; `@target(js)` also applies to `-t ts`) |
 | `+@f(...)` / `+$C` | `def f(...)` + adds to `__all__` | `export function f(...)` / `export class C` |
 
 `@target(...)` with no block must be the first non-docstring statement and declares which targets the file supports; compiling for another target raises `TargetError`. With a block it selects the statements/imports emitted for that target. Target blocks are module-level only.
 
-In language 0.5 a module with no declaration is treated as `@target(py, js)`, as in 0.4.
-Language 0.6.0 changes that default to `@target(py)`; portability then requires an explicit
-`@target(py, js)`. The implicit default is deprecated as of 0.5.0 (`DECISIONS.md` D-003).
+In language 0.6 a module with no declaration is treated as `@target(py)`. Portability is
+opt-in: add `@target(py, js)` to a module that must compile for JavaScript or TypeScript
+(`DECISIONS.md` D-003).
 
 Relative imports resolve against the importing module's directory: `<.util:{f}` loads `util.myna` beside the importing module, `<.pkg.mod:{f}` loads `pkg/mod.myna` (a directory may provide `pkg/__init__.myna` or act as a namespace package), and `<.util` without a name list binds the imported module object. A program's entry file instead resolves against its own directory when run with `myna run`, or against `--module-root DIR` / `MYNA_MODULE_ROOT` when set, which lets an entry in `tests/` reach a sibling `src/`. Absolute imports keep their Python meaning. `myna compile` remains per-file and does not bundle imported modules; `myna bundle` embeds the relative-import graph into one standalone Python file, or with `--zipapp` into a runnable `.pyz` archive.
 
@@ -134,6 +145,12 @@ the same program.
 | `#[dec1, dec2(arg)]` | `@dec1\n@dec2(arg)` | `@dec1\n@dec2(arg)` |
 
 *Note: Inside any class method (except `@/f` static methods and `@$f` class methods), `self` is automatically injected in Python (or `cls` for `@$f`), and leading-dot `.attr` expands to `self.attr` (or `cls.attr`).*
+
+The JavaScript and TypeScript targets support single inheritance only and reject nested
+classes. A `$$` dataclass subclass may inherit a dataclass defined in the same module;
+its generated constructor takes the base's fields and forwards them to `super(...)`.
+A class with an explicit `@init` must call the base constructor with `..init(...)` when
+it has a base.
 
 ---
 
