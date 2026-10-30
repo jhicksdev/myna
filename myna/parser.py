@@ -103,6 +103,10 @@ class Parser:
             else:
                 stmts.append(self.parse_stmt())
             self.skip_seps()
+        # D-003: portability is opt-in.  A module without a declaration is
+        # Python-only; add `@target(py, js)` to compile for JavaScript/TypeScript.
+        if module_targets is None:
+            module_targets = {"py"}
         return ast.Module(body=stmts, targets=module_targets, line=1, col=1)
 
     def _at_target_directive(self) -> bool:

@@ -88,6 +88,29 @@ class TestTypeScriptGeneration(unittest.TestCase):
                             ":", param, f"{name}: unannotated {match.group(0)}"
                         )
 
+    @unittest.skipUnless(has_ts_toolchain(), "node + tests/ts TypeScript toolchain required")
+    def test_all_helpers_typecheck_under_strict(self):
+        from myna.backends.js_gen import HELPER_ORDER, PY_EXCEPTION_ORDER
+        from myna.backends.ts_gen import TSGenerator, ts_helper_source
+
+        generator = TSGenerator()
+        code = "\n".join(
+            generator._exception_shim(name) for name in PY_EXCEPTION_ORDER
+        )
+        code += "\n" + "\n".join(ts_helper_source(name) for name in HELPER_ORDER)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ts_project(root, {"helpers.ts": code})
+            proc = subprocess.run(
+                tsc_command(files=[root / "helpers.ts"]),
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                proc.returncode, 0, f"{proc.stdout}\n{proc.stderr}"
+            )
+
     def test_arrow_builtin_values_are_annotated(self):
         from myna.backends.js_gen import BUILTIN_VALUES
         from myna.backends.ts_gen import TS_BUILTIN_VALUES
@@ -147,6 +170,126 @@ class TestTypeScriptGeneration(unittest.TestCase):
         self.assertIn("function* g(n: number) {", ts)
         self.assertIn("async function* h(n: number) {", ts)
         self.assertNotIn("function* g(n: number): number", ts)
+
+    def test_python_typing_names_map_to_typescript(self):
+        src = (
+            "@target(py, js)\n"
+            "@f(c:Callable[[i], s], m:Mapping[s, i], q:Sequence[i], "
+            "it:Iterator[i], aw:Awaitable[i], g:Generator[i, A, s], "
+            "t:Type[i], h:typing.Hashable)->i => 1\n"
+        )
+        ts = myna_to_ts(src)
+        self.assertIn("c: (arg0: number) => string", ts)
+        self.assertIn("m: Record<string, number>", ts)
+        self.assertIn("q: number[]", ts)
+        self.assertIn("it: Iterable<number>", ts)
+        self.assertIn("aw: Promise<number>", ts)
+        self.assertIn("g: Generator<number, string, any>", ts)
+        self.assertIn("t: new (...args: any[]) => number", ts)
+        self.assertIn("h: any", ts)
+        self.assertNotIn("Callable<", ts)
+
+    def test_bare_builtin_generics(self):
+        src = (
+            "@target(py, js)\n"
+            "@f(a:list, b:dict, c:set, d:tuple, e:type)->i => 1\n"
+        )
+        ts = myna_to_ts(src)
+        self.assertIn("a: any[]", ts)
+        self.assertIn("b: Record<string, any>", ts)
+        self.assertIn("c: Set<any>", ts)
+        self.assertIn("d: any[]", ts)
+        self.assertIn("e: new (...args: any[]) => any", ts)
+
+    def test_callable_argument_forms(self):
+        src = (
+            "@target(py, js)\n"
+            "@f(a:Callable[[i], s], b:Callable[(i, s), b], c:Callable[(), i], "
+            "d:Callable[i, i], e:Callable[[i], s]?, g:[Callable[[i], s]])->i => 1\n"
+        )
+        ts = myna_to_ts(src)
+        self.assertIn("a: (arg0: number) => string", ts)
+        self.assertIn("b: (arg0: number, arg1: string) => boolean", ts)
+        self.assertIn("c: () => number", ts)
+        self.assertIn("d: (arg0: number) => number", ts)
+        self.assertIn("e: ((arg0: number) => string) | null", ts)
+        self.assertIn("g: ((arg0: number) => string)[]", ts)
+
+    def test_generic_arguments_on_user_types_are_erased(self):
+        src = (
+            "@target(py, js)\n"
+            "$Box { x:i = 0 }\n"
+            "$= Alias = [i]\n"
+            "@f(b:Box[i], a:Alias[s])->i => 1\n"
+        )
+        ts = myna_to_ts(src)
+        self.assertIn("b: Box", ts)
+        self.assertIn("a: Alias", ts)
+        self.assertNotIn("Box<", ts)
+        self.assertNotIn("Alias<", ts)
+
+    def test_self_annotation_resolves_to_enclosing_class(self):
+        src = (
+            "@target(py, js)\n"
+            "$C {\n"
+            "  @copy()->Self { ^ C() }\n"
+            "}\n"
+        )
+        self.assertIn("copy(): C", myna_to_ts(src))
+
+    def test_var_keyword_parameter_is_optional(self):
+        ts = myna_to_ts("@target(py, js)\n@f(a:i, **kw:A)->i => a\n")
+        self.assertIn(
+            "function f(a: number, kw: any = {} as any): number", ts
+        )
+
+    def test_with_bindings_are_hoisted_out_of_the_block(self):
+        src = (
+            "@target(py, js)\n"
+            "$C { @close() { _ } }\n"
+            '@main { !& c = C() { _ }; p("after") }\n'
+        )
+        ts = myna_to_ts(src)
+        self.assertIn("let c: any;", ts)
+        self.assertRegex(ts, r"c = __ctx_\d+_0 as any;")
+
+    def test_dataclass_inheritance_uses_base_constructor(self):
+        src = (
+            "@target(py, js)\n"
+            "$$Base(id:i)\n"
+            "$$Child(name:s) < Base\n"
+        )
+        ts = myna_to_ts(src)
+        self.assertIn("class Child extends Base", ts)
+        child = ts[ts.index("class Child") :]
+        self.assertIn("constructor(id: number, name: string)", child)
+        self.assertIn("super(id);", child)
+        self.assertIn("this.name = name;", child)
+        self.assertNotIn("this.id = id;", child)
+
+    def test_nested_classes_are_rejected(self):
+        with self.assertRaises(TargetError):
+            myna_to_ts("@target(py, js)\n$Outer { $Inner { _ } }\n")
+
+    def test_derived_init_must_call_super(self):
+        src = (
+            "@target(py, js)\n"
+            "$Base { @init(x:i) { .x = x } }\n"
+            "$Child < Base { @init(x:i) { .x = x } }\n"
+        )
+        with self.assertRaises(TargetError):
+            myna_to_ts(src)
+
+    def test_dataclass_inheritance_with_custom_init_is_rejected(self):
+        for fields in ("y:i", ""):
+            with self.subTest(fields=fields):
+                src = (
+                    "@target(py, js)\n"
+                    "$Base { @init(x:i) { .x = x } }\n"
+                    f"$$Child({fields}) < Base\n"
+                )
+                with self.assertRaises(TargetError):
+                    myna_to_ts(src)
 
     def test_dataclass_and_class_fields_are_declared(self):
         src = (
@@ -230,6 +373,7 @@ class TestTypeScriptGeneration(unittest.TestCase):
         self.assertIn("target 'ts'", str(caught.exception))
 
         src = """
+        @target(py, js)
         @target(py) { @platform()->s => "py" }
         @target(js) { @platform()->s => "js" }
         """
@@ -271,7 +415,7 @@ class TestTypeScriptGeneration(unittest.TestCase):
 
     def test_relative_imports_need_a_source_path(self):
         with self.assertRaises(TargetError) as caught:
-            myna_to_ts("<.util:{f}\n")
+            myna_to_ts("@target(py, js)\n<.util:{f}\n")
         self.assertIn("TypeScript target", str(caught.exception))
 
     def test_compile_to_ts_ast_entrypoint(self):
@@ -325,6 +469,7 @@ class TestMynaTypeScriptTarget(_JSTargetTests):
     """Run the JavaScript cross-target corpus through tsc + Node."""
 
     def run_both_targets(self, myna_src: str) -> tuple[str, str]:
+        myna_src = self.portable_source(myna_src)
         py_code = myna_to_python(myna_src)
         ts_code = myna_to_ts(myna_src)
 
@@ -363,6 +508,44 @@ class TestMynaTypeScriptTarget(_JSTargetTests):
                 js_proc.returncode, 0, f"TypeScript target failed:\n{ts_code}\n{js_proc.stderr}"
             )
             return py_proc.stdout.strip(), js_proc.stdout.strip()
+
+    def run_ts(self, myna_src: str) -> str:
+        """Typecheck and execute a source that has no runnable Python counterpart."""
+        ts_code = myna_to_ts(myna_src)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ts_project(root, {"main.ts": ts_code})
+            compile_proc = subprocess.run(
+                tsc_command(out_dir=root / "out", files=[root / "main.ts"]),
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                compile_proc.returncode,
+                0,
+                f"invalid or ill-typed generated TypeScript:\n{ts_code}\n"
+                f"{compile_proc.stdout}\n{compile_proc.stderr}",
+            )
+            js_proc = subprocess.run(
+                ["node", str(root / "out" / "main.js")],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                js_proc.returncode,
+                0,
+                f"TypeScript target failed:\n{ts_code}\n{js_proc.stderr}",
+            )
+            return js_proc.stdout.strip()
+
+    def test_ts_typing_annotations_typecheck_and_run(self):
+        src = """
+        @target(py, js)
+        @apply(f:Callable[(i, i), i], x:i)->i => f(x, x)
+        @main { p(apply((a, b) => a + b, 4)) }
+        """
+        self.assertEqual(self.run_ts(src), "8")
 
     def test_ts_relative_imports_typecheck_and_run(self):
         with tempfile.TemporaryDirectory() as tmp:

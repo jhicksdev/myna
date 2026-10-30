@@ -48,6 +48,7 @@ TYPE_SHORTHANDS_TS: dict[str, str] = {
     "str": "string",
     "bool": "boolean",
     "bytes": "Uint8Array",
+    "bytearray": "Uint8Array",
     "Any": "any",
     "None": "null",
     # TypeScript spellings are accepted too; a user class or alias with the same
@@ -65,6 +66,72 @@ TYPE_SHORTHANDS_TS: dict[str, str] = {
     "unknown": "unknown",
     "void": "void",
 }
+
+# Python's `typing` names have no direct TypeScript spelling.  These are the
+# unparameterised fallbacks; `_gen_generic_type` handles their arguments.
+TYPING_SIMPLE_TS: dict[str, str] = {
+    "Annotated": "any",
+    "AnyStr": "string",
+    "AsyncContextManager": "any",
+    "Awaitable": "Promise<any>",
+    "Callable": "(...args: any[]) => any",
+    "ClassVar": "any",
+    "Coroutine": "Promise<any>",
+    "Dict": "Record<string, any>",
+    "Final": "any",
+    "FrozenSet": "Set<any>",
+    "Generator": "Generator<any, any, any>",
+    "Iterable": "Iterable<any>",
+    "Iterator": "Iterable<any>",
+    "List": "any[]",
+    "LiteralString": "string",
+    "Mapping": "Record<string, any>",
+    "MutableMapping": "Record<string, any>",
+    "MutableSequence": "any[]",
+    "MutableSet": "Set<any>",
+    "Never": "never",
+    "NoReturn": "never",
+    "Optional": "any",
+    "Sequence": "any[]",
+    "Set": "Set<any>",
+    "Text": "string",
+    "Tuple": "any[]",
+    "Type": "new (...args: any[]) => any",
+    "Union": "any",
+    # Bare builtin generics, e.g. `x: list` / `x: dict`.
+    "dict": "Record<string, any>",
+    "frozenset": "Set<any>",
+    "list": "any[]",
+    "set": "Set<any>",
+    "tuple": "any[]",
+    "type": "new (...args: any[]) => any",
+    "AsyncGenerator": "AsyncGenerator<any, any>",
+    "AsyncIterable": "AsyncIterable<any>",
+    "AsyncIterator": "AsyncIterable<any>",
+    "Collection": "Iterable<any>",
+    "Container": "Iterable<any>",
+    "ContextManager": "any",
+    "Generic": "any",
+    "Hashable": "any",
+    "Literal": "any",
+    "NotRequired": "any",
+    "Protocol": "any",
+    "ReadOnly": "any",
+    "Required": "any",
+    "Reversible": "any[]",
+    "Sized": "any",
+    "TypedDict": "any",
+}
+
+_TYPING_PREFIXES = frozenset(
+    {"typing", "typing_extensions", "collections", "collections.abc", "builtins"}
+)
+
+
+def _typing_short_name(name: str) -> str:
+    """Return ``T`` for ``typing.T``/``collections.abc.T`` and ``name`` otherwise."""
+    prefix, sep, rest = name.rpartition(".")
+    return rest if sep and prefix in _TYPING_PREFIXES else name
 
 # TypeScript does not allow these as class or type-alias names.  They cannot be
 # renamed everywhere the way JS reserved words can, because an annotation such as
@@ -161,8 +228,24 @@ def ts_helper_source(name: str) -> str:
 
 
 def _array_of(ts_type: str) -> str:
-    """Wrap a union element type in parentheses before appending `[]`."""
-    return f"({ts_type})[]" if "|" in ts_type else f"{ts_type}[]"
+    """Wrap a union or function element type in parentheses before appending `[]`."""
+    if "|" in ts_type or "=>" in ts_type:
+        return f"({ts_type})[]"
+    return f"{ts_type}[]"
+
+
+def _optional_of(ts_type: str) -> str:
+    """Append ``| null`` without changing a function type's meaning."""
+    if ts_type in ("any", "null"):
+        return ts_type
+    if "=>" in ts_type:
+        return f"({ts_type}) | null"
+    return f"{ts_type} | null"
+
+
+def _union_part(ts_type: str) -> str:
+    """Parenthesize a function type that appears as a union member."""
+    return f"({ts_type})" if "=>" in ts_type else ts_type
 
 
 def _record_key(ts_type: str) -> str:
@@ -194,6 +277,8 @@ class TSGenerator(JSGenerator):
         # A top-level alias whose source name is a JS reserved word is declared under
         # its `$`-prefixed binding and re-exported under the source name.
         self.type_export_aliases: list[tuple[str, str]] = []
+        # The class whose body is being generated; `Self` resolves to it.
+        self.current_class: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Generator hooks
@@ -253,60 +338,145 @@ class TSGenerator(JSGenerator):
             if t.name in self.known_classes or t.name in self.type_only_names:
                 base = js_ident(t.name)
             else:
-                base = TYPE_SHORTHANDS_TS.get(t.name, js_ident(t.name))
-            if t.optional and base not in ("any", "null"):
-                return f"{base} | null"
-            return base
+                short = _typing_short_name(t.name)
+                if short in self.known_classes or short in self.type_only_names:
+                    base = js_ident(short)
+                elif short == "Self":
+                    base = self._self_type()
+                elif short in TYPING_SIMPLE_TS:
+                    base = TYPING_SIMPLE_TS[short]
+                elif short != t.name:
+                    # An unhandled name from `typing`/`collections.abc` has no
+                    # TypeScript counterpart; a dangling identifier would fail `tsc`.
+                    base = "any"
+                else:
+                    base = TYPE_SHORTHANDS_TS.get(short, js_ident(short))
+            return _optional_of(base) if t.optional else base
 
         if isinstance(t, ast.ListType):
             base = _array_of(self.gen_type(t.elem))
-            return f"{base} | null" if t.optional else base
+            return _optional_of(base) if t.optional else base
 
         if isinstance(t, ast.DictType):
             key = _record_key(self.gen_type(t.key))
             base = f"Record<{key}, {self.gen_type(t.value)}>"
-            return f"{base} | null" if t.optional else base
+            return _optional_of(base) if t.optional else base
 
         if isinstance(t, ast.SetType):
             base = f"Set<{self.gen_type(t.elem)}>"
-            return f"{base} | null" if t.optional else base
+            return _optional_of(base) if t.optional else base
 
         if isinstance(t, ast.TupleType):
             args = ", ".join(self.gen_type(e) for e in t.elems)
             base = f"[{args}]"
-            return f"{base} | null" if t.optional else base
+            return _optional_of(base) if t.optional else base
 
         if isinstance(t, ast.GenericType):
             base = self._gen_generic_type(t)
-            if t.optional and base not in ("any", "null"):
-                return f"{base} | null"
-            return base
+            return _optional_of(base) if t.optional else base
 
         if isinstance(t, ast.UnionType):
-            return " | ".join(self.gen_type(sub) for sub in t.types) or "any"
+            return " | ".join(_union_part(self.gen_type(sub)) for sub in t.types) or "any"
 
         return "any"
 
     def _gen_generic_type(self, t: ast.GenericType) -> str:
         args = [self.gen_type(a) for a in t.args]
+        base = _typing_short_name(t.base)
+
+        # Myna has no generic declarations, so type arguments on a user class or
+        # alias are advisory noise.  Erasing them keeps `Box[int]` valid TypeScript
+        # instead of emitting `Box<number>` for a non-generic class.
         if t.base in self.known_classes or t.base in self.type_only_names:
-            return f"{js_ident(t.base)}<{', '.join(args)}>"
-        if t.base in ("list", "List"):
+            return js_ident(t.base)
+        if base in self.known_classes or base in self.type_only_names:
+            return js_ident(base)
+
+        if base == "Callable":
+            return self._gen_callable_type(t.args)
+        if base == "Optional":
+            return _optional_of(args[0]) if args else "any"
+        if base == "Union":
+            return " | ".join(_union_part(a) for a in args) if args else "any"
+        if base in ("list", "List", "Sequence", "MutableSequence"):
             return _array_of(args[0]) if args else "any[]"
-        if t.base in ("dict", "Dict"):
+        if base in ("dict", "Dict", "Mapping", "MutableMapping"):
             if len(args) == 2:
                 return f"Record<{_record_key(args[0])}, {args[1]}>"
             return f"Record<string, {args[0] if args else 'any'}>"
-        if t.base in ("set", "Set"):
+        if base in ("set", "Set", "MutableSet", "FrozenSet", "frozenset"):
             return f"Set<{args[0] if args else 'any'}>"
-        if t.base in ("tuple", "Tuple"):
+        if base in ("tuple", "Tuple"):
             return f"[{', '.join(args)}]"
-        if t.base == "Optional":
-            return f"{args[0]} | null" if args else "any"
-        if t.base == "Union":
-            return " | ".join(args) if args else "any"
+        if base in ("Iterable", "Iterator", "Collection", "Container"):
+            return f"Iterable<{args[0] if args else 'any'}>"
+        if base in ("AsyncIterable", "AsyncIterator"):
+            return f"AsyncIterable<{args[0] if args else 'any'}>"
+        if base == "Reversible":
+            return _array_of(args[0]) if args else "any[]"
+        if base == "Awaitable":
+            return f"Promise<{args[0] if args else 'any'}>"
+        if base == "Coroutine":
+            if len(args) >= 3:
+                return f"Promise<{args[2]}>"
+            return f"Promise<{args[0] if args else 'any'}>"
+        if base == "Generator":
+            if len(args) >= 3:
+                # Python is Generator[Yield, Send, Return]; TypeScript is
+                # Generator<Yield, Return, Next>.
+                return f"Generator<{args[0]}, {args[2]}, {args[1]}>"
+            if len(args) == 2:
+                return f"Generator<{args[0]}, {args[1]}, any>"
+            return f"Generator<{args[0] if args else 'any'}, any, any>"
+        if base == "AsyncGenerator":
+            if len(args) >= 2:
+                return f"AsyncGenerator<{args[0]}, {args[1]}>"
+            return f"AsyncGenerator<{args[0] if args else 'any'}, any>"
+        if base in ("Type", "type"):
+            return f"new (...args: any[]) => {args[0] if args else 'any'}"
+        if base in (
+            "ClassVar",
+            "Final",
+            "NotRequired",
+            "Required",
+            "ReadOnly",
+            "Annotated",
+        ):
+            return args[0] if args else "any"
+        if base in ("Literal", "LiteralString"):
+            return "any" if base == "Literal" else "string"
+        if base in ("Self",):
+            return self._self_type()
+        if base in ("NoReturn", "Never"):
+            return "never"
+        if base in ("AnyStr", "Text"):
+            return "string"
+
+        # An unknown name from a typing namespace has no TypeScript counterpart;
+        # `any` is safer than a dangling identifier that fails `tsc`.
+        if base != t.base:
+            return "any"
         name = TYPE_SHORTHANDS_TS.get(t.base, js_ident(t.base))
         return f"{name}<{', '.join(args)}>"
+
+    def _self_type(self) -> str:
+        """Resolve `Self` to the enclosing class, or `any` outside a class."""
+        return js_ident(self.current_class) if self.current_class else "any"
+
+    def _gen_callable_type(self, args: list[ast.TypeNode]) -> str:
+        if len(args) < 2:
+            return "(...args: any[]) => any"
+        params, ret = args[0], self.gen_type(args[1])
+        if isinstance(params, ast.TupleType):
+            elems = params.elems
+        elif isinstance(params, ast.ListType):
+            elems = [params.elem]
+        else:
+            elems = [params]
+        rendered = ", ".join(
+            f"arg{index}: {self.gen_type(elem)}" for index, elem in enumerate(elems)
+        )
+        return f"({rendered}) => {ret}"
 
     # ------------------------------------------------------------------
     # Parameters and functions
@@ -319,6 +489,10 @@ class TSGenerator(JSGenerator):
         rendered = self.gen_type(p.type_ann) if p.type_ann is not None else "any"
         if p.kind == "vararg":
             s = f"...{name}: {_array_of(rendered)}"
+        elif p.kind == "kwarg":
+            # The JavaScript projection passes keyword arguments as a trailing
+            # object, and Python's `**kwargs` is always optional at the call site.
+            s = f"{name}: {rendered} = {{}} as any"
         else:
             s = f"{name}: {rendered}"
         if p.default is not None:
@@ -451,16 +625,50 @@ class TSGenerator(JSGenerator):
                 self.use_exception(base.name)
             ext_part = f" extends {self.gen_expr(base)}"
 
+        plan = (
+            self._dataclass_constructor_plan(cls)
+            if cls.is_dataclass and cls.bases
+            else None
+        )
+        if cls.bases and not cls.is_dataclass:
+            init = next(
+                (
+                    stmt
+                    for stmt in cls.body
+                    if isinstance(stmt, ast.FuncDef) and stmt.method_kind == "init"
+                ),
+                None,
+            )
+            if init is not None and not self._calls_super_init(init):
+                raise TargetError(
+                    f"class '{cls.name}': a derived class with @init must call "
+                    "the base constructor with ..init(...)"
+                )
+
         lines = [f"{self.ind()}{export_prefix}class {js_ident(cls.name)}{ext_part} {{"]
         prev_in_class = self.in_class
+        prev_class = self.current_class
         self.in_class = True
+        self.current_class = cls.name
         self.indent_level += 1
         self.loop_stack.append(None)
 
         declared: set[str] = set()
+        base_field_names = {
+            field.name
+            for field in (
+                self.dataclass_fields.get(cls.bases[0].name, [])
+                if cls.is_dataclass
+                and cls.bases
+                and isinstance(cls.bases[0], ast.Ident)
+                else []
+            )
+        }
 
         # Dataclass fields become property declarations; the generated constructor
-        # assigns them, so definite-assignment assertions are not needed.
+        # assigns them, so definite-assignment assertions are not needed.  Inherited
+        # fields are declared by the base class, and redeclaring one without an
+        # initializer trips `strictPropertyInitialization` in TypeScript.
         if cls.is_dataclass and cls.fields:
             for f in cls.fields:
                 if f.name == "constructor":
@@ -468,9 +676,20 @@ class TSGenerator(JSGenerator):
                         f"class '{cls.name}': TypeScript cannot declare a field "
                         "named 'constructor'"
                     )
+                if f.name in base_field_names:
+                    declared.add(f.name)
+                    continue
                 rendered = self.gen_type(f.type_ann) if f.type_ann is not None else "any"
                 lines.append(f"{self.ind()}{f.name}: {rendered};")
                 declared.add(f.name)
+
+        # Inherited dataclass fields are declared by the base class; remember them
+        # so `_method_attributes` does not redeclare them on this class.
+        if cls.is_dataclass and cls.bases and isinstance(cls.bases[0], ast.Ident):
+            declared.update(
+                field.name
+                for field in self.dataclass_fields.get(cls.bases[0].name, [])
+            )
 
         # Class-body assignments are class fields.  They must be declared before the
         # methods that use them.
@@ -496,10 +715,13 @@ class TSGenerator(JSGenerator):
                 declared.add(target.name)
 
         if cls.is_dataclass and cls.fields:
-            p_strs = [self.gen_param(f) for f in cls.fields]
+            params, super_args, assignments = plan or (cls.fields, [], cls.fields)
+            p_strs = [self.gen_param(f) for f in params]
             lines.append(f"{self.ind()}constructor({', '.join(p_strs)}) {{")
             self.indent_level += 1
-            for f in cls.fields:
+            if cls.bases:
+                lines.append(f"{self.ind()}super({', '.join(super_args)});")
+            for f in assignments:
                 lines.append(f"{self.ind()}this.{f.name} = {js_ident(f.name)};")
             self.indent_level -= 1
             lines.append(f"{self.ind()}}}")
@@ -524,7 +746,12 @@ class TSGenerator(JSGenerator):
                     f"class '{cls.name}': method 'constructor' is reserved for "
                     "@init in the TypeScript target"
                 )
-            if isinstance(s, (ast.FuncDef, ast.ClassDef, ast.NoopStmt)):
+            if isinstance(s, ast.ClassDef):
+                raise TargetError(
+                    f"class '{cls.name}': nested classes are not supported by the "
+                    "TypeScript target"
+                )
+            if isinstance(s, (ast.FuncDef, ast.NoopStmt)):
                 lines.extend(self.gen_stmt(s))
                 continue
             raise TargetError(
@@ -535,6 +762,7 @@ class TSGenerator(JSGenerator):
         self.loop_stack.pop()
         self.indent_level -= 1
         self.in_class = prev_in_class
+        self.current_class = prev_class
         lines.append(f"{self.ind()}}}")
         return lines
 
@@ -604,36 +832,46 @@ class TSGenerator(JSGenerator):
                 yield from self._self_attr_targets(target.elts)
 
     def gen_with_stmt(self, stmt: ast.WithStmt) -> list[str]:
-        lines = [f"{self.ind()}{{"]
-        self.indent_level += 1
+        lines: list[str] = []
+        # Python's `with` does not introduce a scope, so a name bound by `as` must
+        # remain visible after the block.  `let` without an initializer is `any`
+        # under `strict`; the generator assigns it from the context handle.
+        for item in stmt.items:
+            if item.optional_vars is None:
+                continue
+            for name in self._binding_names(item.optional_vars):
+                if not self.is_declared(name):
+                    lines.append(f"{self.ind()}let {js_ident(name)}: any;")
+                    self.declare(name)
+
+        # The context handle needs a name that is unique across sibling `with`
+        # statements; the statement itself must not add a block because Python's
+        # `with` does not scope assignments made in its body.
+        self.with_counter += 1
+        prefix = f"__ctx_{self.with_counter}"
         self.push_scope()
         for idx, item in enumerate(stmt.items):
-            var_s = (
-                self.gen_expr(item.optional_vars)
-                if item.optional_vars is not None
-                else f"__ctx_{idx}"
-            )
-            if item.optional_vars is not None and isinstance(item.optional_vars, ast.Ident):
-                self.declare(item.optional_vars.name)
             lines.append(
-                f"{self.ind()}const {var_s} = {self.gen_expr(item.context_expr)};"
+                f"{self.ind()}const {prefix}_{idx} = "
+                f"{self.gen_expr(item.context_expr)};"
             )
+            if item.optional_vars is not None and not (
+                isinstance(item.optional_vars, ast.Ident)
+                and item.optional_vars.name == "_"
+            ):
+                target = self._gen_destructure_target(item.optional_vars)
+                # Python rebinding is dynamic; an existing local may have a
+                # narrower inferred type, so keep the erased/`any` semantics.
+                lines.append(f"{self.ind()}{target} = {prefix}_{idx} as any;")
         lines.append(f"{self.ind()}try {{")
         lines.extend(self.gen_block(stmt.body, new_scope=False))
         lines.append(f"{self.ind()}}} finally {{")
         self.indent_level += 1
-        for idx, item in enumerate(stmt.items):
-            var_s = (
-                self.gen_expr(item.optional_vars)
-                if item.optional_vars is not None
-                else f"__ctx_{idx}"
-            )
-            lines.append(f"{self.ind()}({var_s} as any)?.close?.();")
+        for idx, _ in enumerate(stmt.items):
+            lines.append(f"{self.ind()}({prefix}_{idx} as any)?.close?.();")
         self.indent_level -= 1
         lines.append(f"{self.ind()}}}")
         self.pop_scope()
-        self.indent_level -= 1
-        lines.append(f"{self.ind()}}}")
         return lines
 
     # ------------------------------------------------------------------

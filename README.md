@@ -169,10 +169,13 @@ p(slug("Hello World"))
 
 ### JavaScript target
 
-`myna compile -t js` and `myna run -t js` emit ES modules. JavaScript is a **bounded
-target**: Myna semantics are Python semantics, so the generator inlines `__myna_*`
-helpers for truthiness, equality, `%`, `//`, `#`, `<-`, indexing, slicing, and printing.
-The runtime floor is Node 20.11+ (`import.meta.filename` backs the `@main` guard).
+`myna compile -t js` and `myna run -t js` emit ES modules. Portability is opt-in: a
+module without a declaration is Python-only, so add `@target(py, js)` to any file that
+must compile for JavaScript or TypeScript (`DECISIONS.md` D-003). JavaScript is a
+**bounded target**: Myna semantics are Python semantics, so the generator inlines
+`__myna_*` helpers for truthiness, equality, `%`, `//`, `#`, `<-`, indexing, slicing, and
+printing. The runtime floor is Node 20.11+ (`import.meta.filename` backs the `@main`
+guard).
 
 Unsupported constructs fail with a compile-time `TargetError` instead of producing wrong
 output:
@@ -221,12 +224,24 @@ Annotations become TypeScript types where Myna has them:
 | `{K:V}` | `Record<K, V>` |
 | `{T}` | `Set<T>` |
 | `(T1, T2)` | `[T1, T2]` |
-| `Name[T]` | `Name<T>` |
+| `Name[T]` | `Name<T>` for TypeScript-library types; the arguments are erased for user classes and aliases |
+
+Python `typing` names are translated too: `Callable[[i], s]` becomes
+`(arg0: number) => string`, `Mapping[K, V]` becomes `Record<K, V>`, `Sequence[T]`
+becomes `T[]`, `Iterator[T]` becomes `Iterable<T>`, `Awaitable[T]` becomes
+`Promise<T>`, `Generator[Y, S, R]` becomes `Generator<Y, R, S>`, `Type[T]` becomes
+`new (...args: any[]) => T`, and `Self` resolves to the enclosing class.
+`ClassVar[T]`, `Final[T]`, and `Annotated[T, ...]` erase to `T`; an unknown
+`typing.*` name becomes `any` instead of a dangling identifier. User classes and
+aliases are not generic in Myna, so `Box[int]` is emitted as `Box` (the same rule as
+erased annotations).
 
 `$= Alias = Type` becomes `export type Alias = Type`, and a relative import of a type
 alias becomes `import type`; every other top-level binding is exported as before.
 Unannotated parameters are emitted as explicit `any` (not implicit), and a function with
 a declared return type gets a `null as any` fallback where Python could fall off the end.
+A `**kwargs` parameter becomes an optional trailing object parameter, matching the
+JavaScript projection's keyword-argument shape.
 
 The guarantee is that a module whose annotations are truthful passes `tsc --strict`.
 `tsc` also rejects a Myna annotation that does not match the value (for example
@@ -257,10 +272,15 @@ resolves them to the generated `.ts` files.
 The JavaScript limits apply unchanged. TypeScript-specific limits: no decorators
 (NestJS/Angular-style), no JSX/TSX, no `implements`, and no generic declarations.
 Classes only declare fields found in the class body, dataclass fields, or `self.x =`
-assignments inside methods; dynamically added attributes need a declaration. Tuples and
-lists are both arrays, and dictionary keys are string-coerced at runtime, so
-`Record<K, V>` is advisory; a non-key-compatible `K` is emitted as `Record<string, V>`.
-Strict TypeScript also rejects dynamically retyped locals; annotate them with `A`.
+assignments inside methods; dynamically added attributes need a declaration. Nested
+classes are rejected. A dataclass may inherit one dataclass defined in the same module;
+the subclass constructor takes the base's fields and calls `super(...)`. Deriving a
+dataclass from a class with a custom `@init` is rejected because there is no dataclass
+constructor to forward to. Tuples and lists are both arrays, and dictionary keys are
+string-coerced at runtime, so `Record<K, V>` is advisory; a non-key-compatible `K` is
+emitted as `Record<string, V>`. Strict TypeScript also rejects dynamically retyped
+locals; annotate them with `A`. A `with ... as name` binding is declared outside the
+generated `try` so it remains visible after the statement, as in Python.
 
 The test suite compiles the cross-target corpus with `tsc --strict`, transpiles it, and
 executes it with Node alongside the Python output. The dev-only toolchain lives in

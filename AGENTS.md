@@ -31,7 +31,7 @@ python3 -m myna stats examples/demo.myna
 - `myna bundle` (`bundler.py`) compiles the relative-import graph into one standalone Python file with embedded module sources, or a reproducible `.pyz` zipapp with real module files.
 - Python -> Myna: `frontends/python_decompile.py` uses Python's stdlib `ast`; it does not go through the Myna lexer/parser. `test_roundtrip_py_to_myna_to_py` and `test_roundtrip_corpus.py` are the contract.
 - Adding a construct means touching lexer + parser + the Python backend and the JavaScript backend (`ts_gen.py` inherits most JS generation). Each generator raises `ValueError("Unsupported ... node")` for unhandled AST nodes, so JS/Python parity gaps surface only when exercised.
-- Target support: `targets.py` enforces module-level `@target(...)` contracts and expands `@target(...) { ... }` blocks before a backend generates code. `VALID_TARGETS` is `py`/`js`; TypeScript reuses the `js` contract with `label="ts"` for error messages.
+- Target support: `targets.py` enforces module-level `@target(...)` contracts and expands `@target(...) { ... }` blocks before a backend generates code. `VALID_TARGETS` is `py`/`js`; TypeScript reuses the `js` contract with `label="ts"` for error messages. A module with no `@target` declaration defaults to `@target(py)` (D-003); portable tests and examples must declare `@target(py, js)`.
 - Public API is re-exported from `myna/__init__.py`; CLI wiring is in `myna/cli.py`.
 
 ## Language-change checklist

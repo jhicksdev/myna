@@ -1,3 +1,5 @@
+@target(py, js)
+
 @target(py) {
   <math
   @pi->f => math.pi

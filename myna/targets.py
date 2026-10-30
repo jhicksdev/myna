@@ -19,8 +19,9 @@ def enforce_module_target(
     ``label`` is the user-facing target name when one backend serves more than one
     output format (the TypeScript target uses the ``js`` contract but reports ``ts``).
     """
-    if mod.targets is not None and target not in mod.targets:
-        declared = ", ".join(sorted(mod.targets))
+    declared_targets = mod.targets if mod.targets is not None else {"py"}
+    if target not in declared_targets:
+        declared = ", ".join(sorted(declared_targets))
         shown = label or target
         raise TargetError(
             f"module declares @target({declared}); target '{shown}' is not supported"

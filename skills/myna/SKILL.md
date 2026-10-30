@@ -33,8 +33,12 @@ TypeScript is a **typed projection of the JavaScript target**: `-t ts` uses the 
 helpers, Portable Core, `@target(py, js)` contract, and `@target(js)` blocks, and emits
 the same `TargetError`s. Annotations are erased; unannotated parameters become explicit
 `any`; `$=` becomes `export type` and a relative import of an alias becomes `import type`.
-A module whose annotations are truthful passes `tsc --strict`. There is no
-`@target(ts)`. `myna run -t ts` is compile-only in this release; use `-t js` to execute.
+A module whose annotations are truthful passes `tsc --strict`. Python `typing` names map
+to TypeScript (`Callable[[i], s]` → `(arg0: number) => string`, `Mapping[K,V]` →
+`Record<K,V>`, `Sequence[T]` → `T[]`, `Awaitable[T]` → `Promise<T>`, `Self` → the
+enclosing class); user classes/aliases are not generic, so `Box[i]` becomes `Box`. There
+is no `@target(ts)`. `myna run -t ts` is compile-only in this release; use `-t js` to
+execute.
 
 ## 2. Complete Symbol Rosetta Stone
 
@@ -51,7 +55,7 @@ A module whose annotations are truthful passes `tsc --strict`. There is no
 - `<.utils:{helper}` → `from .utils import helper`; relative imports resolve from the importing module's directory (`.pkg.mod` → `pkg/mod.myna`, directories need no `__init__.myna`). For `myna run`, the entry file's imports resolve from its own directory or from `--module-root DIR` / `MYNA_MODULE_ROOT`; `<.util` (no list) binds the module object. For `-t js` they become `./utils.js` specifiers; `-t ts` uses the same specifiers.
 - `@=x, y` → `global x, y` | `^=x, y` → `nonlocal x, y` | `~x[k]` → `del x[k]`
 - `$=Alias = [i]` → `type Alias = list[int]` (TS: `export type Alias = number[];`)
-- `@target(py)` → module is Python-only; `@target(py, js)` is portable (default: both). Must precede all code. `js` also permits `-t ts`; there is no `@target(ts)`.
+- `@target(py)` → module is Python-only (the default when no declaration is present); `@target(py, js)` opts into portability. Must precede all code. `js` also permits `-t ts`; there is no `@target(ts)`.
 - `@target(py) { <asyncio; ... }` / `@target(js) { ... }` → module-level compile-time block; only the matching target's statements/imports are emitted (`js` blocks also apply to `-t ts`).
 
 ### Functions, Classes & Decorators

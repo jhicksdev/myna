@@ -99,7 +99,7 @@ Python remains the primary target: everything documented must work there.
 
 ## D-003 — `@target` defaults to Python only
 
-**Status:** Accepted — 2026-10-26; deferred to 0.6.0 (2026-10-28)
+**Status:** Accepted — 2026-10-26; implemented in 0.6.0 (2026-10-29)
 
 ### Context
 
@@ -230,6 +230,12 @@ TypeScript is an **output dialect** of the JavaScript target, not a third target
 - `myna/backends/ts_gen.py` subclasses `JSGenerator` and reuses the JavaScript helper
   bodies with an annotated overlay. Helper bodies stay single-sourced; a change to a
   JavaScript helper surfaces as a TypeScript typecheck failure in the test suite.
+- Python `typing`/`collections.abc` annotations are translated (`Callable`, `Mapping`,
+  `Sequence`, `Iterator`, `Awaitable`, `Generator`, `Type`, `Self`, and their relatives)
+  rather than emitted verbatim. Myna has no generic declarations, so type arguments on a
+  user class or alias are erased (`Box[int]` → `Box`); unknown `typing.*` names become
+  `any` instead of a dangling identifier. The helper typecheck test compiles every
+  helper, not only the helpers a particular corpus uses.
 - The test suite compiles the JavaScript cross-target corpus with `tsc --strict`,
   transpiles it, and executes it with Node, in addition to type-mapping and interop
   tests. The TypeScript compiler and `@types/node` are dev-only tools in
