@@ -20,7 +20,7 @@ python3 -m myna stats examples/demo.myna
 - `tests/test_js.py` shells out to `node` and skips when Node is not on `PATH`; CI runs it on Node 20/22/24, so do not accept a local run where it skipped.
 - `tests/test_ts.py` needs `node` plus the dev-only toolchain in `tests/ts/node_modules` (or `MYNA_TSC`); CI runs `npm ci --prefix tests/ts` so the executable TS cases do not skip. The generation tests run without either.
 - No lint, format, or typecheck config is checked in; unittest is the verification gate and `.github/workflows/test.yml` runs it on every PR. `.ruff_cache/` is a local artifact, not a configured tool.
-- CLI aliases: `compile`/`c`/`myna2py`/`myna2js`, `decompile`/`d`/`py2myna`, `run`/`r`, `stats`/`s`. Output extension `.js`/`.mjs`/`.ts`/`.mts` selects the JS or TS target only when `-t` is omitted. `myna run -t ts` is deliberately compile-only.
+- CLI aliases: `compile`/`c`/`myna2py`/`myna2js`, `decompile`/`d`/`py2myna`, `run`/`r`, `stats`/`s`. Output extension `.js`/`.mjs`/`.ts`/`.mts` selects the JS or TS target only when `-t` is omitted. `myna run -t ts` compiles a temporary `.mts` tree and executes it with Bun or Node >= 22.6, which is why its specifiers name `.mts` files.
 
 ## Architecture
 

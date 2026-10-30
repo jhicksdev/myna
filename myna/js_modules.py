@@ -2,7 +2,9 @@
 
 `myna run -t js` uses this to lay out every reachable `.myna` module as a sibling `.mjs`
 file in a temporary directory, so Node's own ES module resolution handles the graph.
-`myna compile -t js` compiles one file at a time and is not involved here.
+`myna run -t ts` passes `compile_module_ts` and `.mts`, which is also what its
+relative-import specifiers name. `myna compile` compiles one file at a time and is not
+involved here.
 """
 
 from __future__ import annotations

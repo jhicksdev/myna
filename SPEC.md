@@ -1,4 +1,4 @@
-# Myna Language Specification (v0.6)
+# Myna Language Specification (v0.7)
 
 **Myna** is an ultra-dense, symbol-based, AI-native programming language designed to minimize LLM token consumption while mapping 1-to-1 onto the semantics of **Python 3.12+** (normative) and a portable subset of **JavaScript (ES2024+)** and **TypeScript**.
 

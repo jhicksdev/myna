@@ -9,7 +9,7 @@ from myna.frontends.python_decompile import DecompileError, decompile_python
 from myna.checks import CompileError
 from myna.targets import TargetError
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 # The language version is the package major.minor; derive it so the two cannot drift.
 LANGUAGE_VERSION = ".".join(__version__.split(".")[:2])
 

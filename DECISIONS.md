@@ -327,3 +327,46 @@ before the call.
   that is meaningless on Python compiles to a plain call rather than erroring.
 - `Call` and `NewExpr` share the argument layout, including the `k: v` dict shorthand and
   the `**kwargs` diagnostic in `myna/checks.py`.
+
+---
+
+## D-008 — call-site `k: v` is a dict; `k=v` is a keyword argument; `d$k` is a literal key
+
+**Status:** Accepted — 2026-10-29
+**Supersedes:** none
+
+### Context
+
+Three dense shorthands read like Python idioms they are not (GAPS.md G2, G3, and G5):
+
+- `f(a, k: v)` lowers to `f(a, {"k": v})` at parse time, which collides with the
+  `**kwargs` reading every Python author has.
+- `d$k` is `d["k"]`, always — even when `k` is a variable in scope.
+- `{Content-Type: "json"}` parsed as subtraction and failed at run time.
+
+The alternatives are worse. Making `k: v` mean keyword arguments *sometimes* would make
+one syntax mean two things depending on a callee the generator often cannot resolve
+(signatures of imported Myna modules are not loaded). Making `$name` dynamic would remove
+the reason it exists — avoiding quotes — and `d[k]` is already shorter for the computed
+case.
+
+### Decision
+
+The documented meanings stay, and the mistakes become compile errors where they are
+certain:
+
+- `f(a, k: v)` is a dict literal; `f(a, k=v)` is a keyword argument. When the callee is
+  declared in the same module and declares `**kwargs`, the call is a `CompileError` that
+  names both spellings (`myna/checks.py`). Imported callees keep the documented rule.
+- `d$k` / `d$?k` take a literal key; `d[k]` is the computed form. Documented in
+  `SPEC.md` §8 rather than changed.
+- A dict key that is a subtraction or division of two identifiers is a parse error
+  suggesting quotes; `{(a - b): 1}` still computes a key.
+
+### Consequences
+
+- The rule is target-independent: the check runs before code generation for py, js, and
+  ts, so the targets cannot disagree.
+- Starling's CLI-flag pattern (`f(1, verbose: T)`) keeps working; a `**kwargs` helper it
+  calls with a dict must pass the dict explicitly (`f(1, {b: 2})`).
+- `SPEC.md` §8 documents all three shorthands, which the report noted were unstated.

@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## 0.7.0 (2026-10-29)
+
+Second half of the Starling downstream report (`GAPS.md`): the additions that were
+language or CLI surface rather than fixes. Minor bump per `VERSIONING.md` §2.
+
+### Added
+
+- `new C(args)` constructs a class defined outside Myna. Python emits a plain call;
+  JavaScript and TypeScript emit `new`, which a foreign class requires. Myna classes keep
+  their implicit `new`. See `DECISIONS.md` D-009.
+- `?? subject { pat => expr; _ => expr }` in expression position is a match expression:
+  the value of the matched arm, with the same patterns, guards, and captures as the
+  statement form and a single evaluation of the subject. Python hoists a `match` helper;
+  JavaScript/TypeScript build a nested conditional.
+- Quoted module names import packages that are not dotted identifiers, which is how scoped
+  npm packages work: `<"@opentui/core":{createCliRenderer}` or `<"@opentui/core">core`.
+  The Python target raises `TargetError`.
+- `myna run -t ts` compiles the reachable graph to a temporary `.mts` tree and executes it
+  with Bun or Node >= 22.6. `DECISIONS.md` D-006 is amended accordingly.
+- `myna compile --module-ext {.js,.mjs,.ts,.mts}` overrides the extension used in
+  relative-import specifiers for `-t js`/`-t ts`; the default still follows `-o`.
+- `CompileError` (exported from `myna`) reports program-level problems found before code
+  generation.
+
+### Changed
+
+- A call whose callee is declared in the same module with `**kwargs` and receives a trailing
+  `k: v` argument now raises `CompileError` naming both spellings. Passing a dict to an
+  imported callable is unchanged. See `DECISIONS.md` D-008.
+- A statement-form match arm holding a bare value (`?? v { 0 => "zero" }`) is a parse
+  error: it was computed and discarded. Block arms and arms with a side effect are
+  unchanged.
+
+### Fixed
+
+- JavaScript/TypeScript: an alternative pattern (`"b" | "c"`) compiled to a bitwise OR
+  instead of an alternative set.
+
+### Documentation
+
+- `SPEC.md` is v0.7 and documents `new`, the match expression, quoted module names,
+  `--module-ext`, and the call-site dict / `d$key` rules.
+
 ## 0.6.1 (2026-10-29)
 
 Correctness patch from the Starling downstream report (`GAPS.md`). No new syntax, no CLI

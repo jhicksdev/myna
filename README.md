@@ -90,6 +90,9 @@ python3 -m myna run examples/demo.myna
 # Run a portable Myna script via Node.js (JavaScript target)
 python3 -m myna run -t js examples/cross_target.myna
 
+# Run the same program through the TypeScript target (Bun, or Node >= 22.6)
+python3 -m myna run -t ts examples/cross_target.myna
+
 # Compile Myna -> Python (.py)
 python3 -m myna compile examples/rest_api.myna -o rest_api.py
 
