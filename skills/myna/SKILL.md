@@ -65,6 +65,7 @@ execute.
 - `*@gen(n) { %i<-..n { ^*i } }` → generator (`^*` = `yield`, `^**` = `yield from`)
 - `x => x+1` or `(a,b) => a+b` → `lambda`
 - `$C < Base { @init(x){ .x=x; ..init() } }` → `class C(Base): def __init__(self, x): self.x = x; super().__init__()`
+- `new C(a, b)` → JS/TS `new C(a, b)`, Python `C(a, b)`. Use it for any class defined outside Myna (a library class); Myna classes are called plainly.
 - `$$User(id:i, name:s="anon") { ... }` → `@dataclass class User:` with typed fields (`=[s]=[]`-style list/dict/set defaults become `field(default_factory=...)`, one value per instance)
 - **Class Methods (implicit `self`/`cls`, `.attr` = `self.attr`, `..m()` = `super().m()`):**
   - `@/f(a){...}` → `@staticmethod` | `@$f(a){...}` → `@classmethod`

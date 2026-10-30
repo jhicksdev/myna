@@ -149,6 +149,16 @@ class Call(Expr):
 
 
 @dataclass
+class NewExpr(Expr):
+    """`new C(args)`: an explicit constructor call for a foreign class."""
+
+    func: Expr = field(default_factory=Expr)
+    args: list[Expr] = field(default_factory=list)
+    keywords: list[tuple[Optional[str], Expr]] = field(default_factory=list)
+    dict_shorthand: bool = False
+
+
+@dataclass
 class Attribute(Expr):
     value: Expr = field(default_factory=Expr)
     attr: str = ""

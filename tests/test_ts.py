@@ -539,6 +539,17 @@ class TestMynaTypeScriptTarget(_JSTargetTests):
             )
             return js_proc.stdout.strip()
 
+    def test_ts_new_constructs_foreign_classes(self):
+        """`new C(...)` keeps working through the typed projection (GAPS.md G8)."""
+        src = """
+        @target(py, js)
+        @main {
+            u = new URL("https://example.com/a/b?q=1")
+            p(u.pathname)
+        }
+        """
+        self.assertEqual(self.run_ts(src), "/a/b")
+
     def test_ts_typing_annotations_typecheck_and_run(self):
         src = """
         @target(py, js)

@@ -188,6 +188,17 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["pairs"], [(0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)])
         self.assertEqual(ns["merged"], {"a": 1, "b": 20, "c": 30})
 
+    def test_new_is_a_plain_call_on_python(self):
+        """`new C(...)` is a constructor call; Python has no `new`, so it emits `C(...)`."""
+        src = "$$P(x:i)\np1 = new P(3)\np2 = P(4)\n"
+        py_code = myna_to_python(src)
+        self.assertIn("p1 = P(3)", py_code)
+        ns = self.exec_myna(src)
+        self.assertEqual((ns["p1"].x, ns["p2"].x), (3, 4))
+
+        with self.assertRaises(ParseError):
+            myna_to_python("x = new(1)\n")
+
     def test_kwargs_callee_rejects_positional_dict_shorthand(self):
         """`f(1, b: 2)` stays a dict, but a known `**kwargs` callee gets a diagnostic (G3)."""
         src = """

@@ -325,6 +325,7 @@ Running `stats` directly on a `.myna` file instead compares the generated Python
 | **Functions** | `@f(a:i, b=1)->i { ^a+b }` or `@f(a)=>a+1` | `def f(a: int, b=1) -> int: return a + b` | `function f(a, b = 1) { return a + b; }` |
 | **Async / Gen** | `~@f` / `~expr` / `*@gen` / `^*val` | `async def` / `await` / generator / `yield` | `async function` / `await` / `function*` / `yield` |
 | **Classes** | `$C < Base { @init(x){ .x=x } }` | `class C(Base): def __init__(self, x): self.x = x` | `class C extends Base { constructor(x) { this.x = x; } }` |
+| **Constructors** | `new ExternalCtor(1, opts: T)` | `ExternalCtor(1, {"opts": True})` | `new ExternalCtor(1, {opts: true})` |
 | **Dataclasses** | `$$User(id:i, name:s="anon")` | `@dataclass class User: ...` | `class User { constructor(id, name = "anon") ... }` |
 | **Dict Shorthands** | `{.id, .title, =name, ok: T}` | `{"id": self.id, "title": self.title, "name": name, "ok": True}` | `({id: this.id, title: this.title, name, ok: true})` |
 | **Key Lookup** | `d$key` / `d$?key ?? "def"` | `d["key"]` / `d.get("key") or "def"` | `d["key"]` / `d.get("key") ?? "def"` |

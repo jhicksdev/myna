@@ -702,6 +702,20 @@ class PythonGenerator:
                 return self.gen_expr(rewritten, parent_prec)
             return f"{self.gen_expr(expr.right, 90)}({self.gen_expr(expr.left)})"
 
+        if isinstance(expr, ast.NewExpr):
+            # Python has no `new`; a class call is the constructor.
+            return self.gen_expr(
+                ast.Call(
+                    func=expr.func,
+                    args=expr.args,
+                    keywords=expr.keywords,
+                    dict_shorthand=expr.dict_shorthand,
+                    line=expr.line,
+                    col=expr.col,
+                ),
+                parent_prec,
+            )
+
         if isinstance(expr, ast.Call):
             if isinstance(expr.func, ast.Ident) and expr.func.name in ("@u8", "@u8d") and len(expr.args) == 1 and not expr.keywords:
                 target_s = self.gen_expr(expr.args[0], 90)

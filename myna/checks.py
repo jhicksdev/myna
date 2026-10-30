@@ -82,7 +82,7 @@ def check_call_dict_shorthand(mod: ast.Module) -> None:
     if not callables:
         return
     for node in iter_nodes(mod):
-        if not isinstance(node, ast.Call) or not getattr(node, "dict_shorthand", False):
+        if not isinstance(node, (ast.Call, ast.NewExpr)) or not getattr(node, "dict_shorthand", False):
             continue
         if not isinstance(node.func, ast.Ident):
             continue

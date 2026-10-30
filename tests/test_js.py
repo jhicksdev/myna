@@ -743,6 +743,41 @@ class TestMynaJavaScriptTarget(unittest.TestCase):
         self.assertEqual(without_root.returncode, 1)
         self.assertIn("cannot resolve relative import", without_root.stderr)
 
+    def test_new_constructs_foreign_classes(self):
+        """`new C(...)` is the only way to call a JavaScript class constructor (GAPS.md G8)."""
+        src = """
+@target(js)
+@main {
+    u = new URL("https://example.com/a/b?q=1")
+    p(u.pathname)
+}
+"""
+        js_code = myna_to_js(src)
+        self.assertIn('new URL("https://example.com/a/b?q=1")', js_code)
+        self.check_js_syntax(js_code)
+
+        without_new = src.replace("new URL(", "URL(")
+        self.assertNotIn("new URL", myna_to_js(without_new))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "with_new.mjs").write_text(js_code, encoding="utf-8")
+            (root / "without_new.mjs").write_text(
+                myna_to_js(without_new), encoding="utf-8"
+            )
+            with_new = subprocess.run(
+                ["node", str(root / "with_new.mjs")], capture_output=True, text=True
+            )
+            plain = subprocess.run(
+                ["node", str(root / "without_new.mjs")], capture_output=True, text=True
+            )
+
+        self.assertEqual(with_new.returncode, 0, with_new.stderr)
+        self.assertEqual(with_new.stdout.strip(), "/a/b")
+        # The failure the keyword exists to prevent.
+        self.assertNotEqual(plain.returncode, 0)
+        self.assertIn("cannot be invoked without 'new'", plain.stderr)
+
     def test_examples_generate_valid_javascript(self):
         for path in sorted((REPO_ROOT / "examples").glob("*.myna")):
             src = path.read_text(encoding="utf-8")

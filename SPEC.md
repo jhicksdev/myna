@@ -149,8 +149,16 @@ the same program.
 | `.x` / `.m()` | `self.x` / `self.m()` | `this.x` / `this.m()` |
 | `..init(a)` / `..m()` | `super().__init__(a)` / `super().m()` | `super(a)` / `super.m()` |
 | `#[dec1, dec2(arg)]` | `@dec1\n@dec2(arg)` | `@dec1\n@dec2(arg)` |
+| `new C(a, b)` | `C(a, b)` | `new C(a, b)` |
 
 *Note: Inside any class method (except `@/f` static methods and `@$f` class methods), `self` is automatically injected in Python (or `cls` for `@$f`), and leading-dot `.attr` expands to `self.attr` (or `cls.attr`).*
+
+`new C(...)` is an explicit constructor call. Python emits a plain call; JavaScript and
+TypeScript emit `new C(...)`, which is the only way to construct a class defined outside
+Myna. `new` binds to the call that follows it, so `new C(1)` (not `new(C(1))`); calling
+an external class without `new` still generates a plain call and fails at run time. Myna
+classes need no `new` — the JavaScript target adds it when it knows the callee is a class
+(`DECISIONS.md` D-009).
 
 The JavaScript and TypeScript targets support single inheritance only and reject nested
 classes. A `$$` dataclass subclass may inherit a dataclass defined in the same module;

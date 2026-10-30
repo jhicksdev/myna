@@ -287,3 +287,40 @@ are unchanged.
   `python -> myna -> python` contract in `test_roundtrip_corpus.py` still holds.
 - The alternative — treating the literals as shadowable — was rejected: it would make
   `x = 1; T = 2; p(T)` depend on statement order for a one-character token.
+
+---
+
+## D-009 — `new` is an explicit constructor call
+
+**Status:** Accepted — 2026-10-29
+**Supersedes:** none
+
+### Context
+
+The JavaScript target injects `new` when the callee is a class it knows about (a Myna
+class, an imported Myna class, or a Python exception shim). A class from a JavaScript or
+TypeScript library is not in that set, so `BoxRenderable(r, opts)` emitted a plain call
+and failed at run time with "Cannot call a class constructor without new" — cleanly
+compiled, silently wrong (GAPS.md G8). Guessing from the callee's capitalisation would
+break Python callables and Myna functions, and there is no runtime class test that works
+before the call.
+
+### Decision
+
+`new C(a, b)` is an expression-level constructor call:
+
+- Python emits `C(a, b)` (identity — Python classes are called).
+- JavaScript and TypeScript emit `new C(a, b)`.
+- Implicit `new` for known classes is unchanged, so existing Myna code is unaffected.
+- `new` must be followed by a call: `new C(args)` or `new a.b.C(args)`. `new` is a soft
+  keyword — it is only special when followed by an identifier or `(` in prefix position,
+  so an existing binding named `new` outside that shape still parses.
+
+### Consequences
+
+- A library adapter layer (`box()`, `text()`, …) is no longer required; `new` lives in the
+  calling Myna code.
+- The Python target cannot distinguish an external call from a constructor, so a `new`
+  that is meaningless on Python compiles to a plain call rather than erroring.
+- `Call` and `NewExpr` share the argument layout, including the `k: v` dict shorthand and
+  the `**kwargs` diagnostic in `myna/checks.py`.

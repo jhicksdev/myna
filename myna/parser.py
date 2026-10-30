@@ -1146,6 +1146,27 @@ class Parser:
             self.pos += 1
             return ast.Literal(value="...", kind="ellipsis", line=tok.line, col=tok.col)
 
+        # Explicit constructor call `new C(a, b)`: JavaScript/TypeScript emit `new`.
+        if (
+            tok.type == TT.IDENT
+            and tok.value == "new"
+            and self.peek().type in (TT.IDENT, TT.LPAREN)
+        ):
+            self.pos += 1
+            target = self.parse_expr(min_bp=90, stop_before_lbrace=stop_before_lbrace)
+            if not isinstance(target, ast.Call):
+                raise ParseError(
+                    "'new' expects a constructor call, as in `new C(args)`", tok
+                )
+            return ast.NewExpr(
+                func=target.func,
+                args=target.args,
+                keywords=target.keywords,
+                dict_shorthand=target.dict_shorthand,
+                line=tok.line,
+                col=tok.col,
+            )
+
         # Built-in `@` call shorthands in expressions: `@enum`, `@zip`, `@map`, `@flt`, `@srt`, `@rev`, `@sum`, `@min`, `@max`, `@str`, `@int`, `@set`, `@list`, `@dict`
         if tok.type == TT.AT and self.peek().type == TT.IDENT:
             name_tok = self.peek()

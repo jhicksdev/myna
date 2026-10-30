@@ -1597,6 +1597,9 @@ class JSGenerator:
             )
             return self.gen_expr(rewritten, parent_prec)
 
+        if isinstance(expr, ast.NewExpr):
+            return self.gen_new(expr)
+
         if isinstance(expr, ast.Call):
             return self.gen_call(expr)
 
@@ -1829,6 +1832,22 @@ class JSGenerator:
                     kw_items.append(f"{k}: {self.gen_expr(v)}")
             arg_parts.append(f"{{{', '.join(kw_items)}}}")
         return f"{func_s}({', '.join(arg_parts)})"
+
+    def gen_new(self, expr: ast.NewExpr) -> str:
+        """Emit `new C(...)`: an external class constructor, which JS cannot call plainly."""
+        func_s = self.gen_expr(expr.func, 90)
+        if not isinstance(expr.func, (ast.Ident, ast.Attribute)) or "=>" in func_s:
+            func_s = f"({func_s})"
+        arg_parts = [self.gen_expr(a) for a in expr.args]
+        if expr.keywords:
+            kw_items: list[str] = []
+            for k, v in expr.keywords:
+                if k is None:
+                    kw_items.append(f"...{self.gen_expr(v)}")
+                else:
+                    kw_items.append(f"{k}: {self.gen_expr(v)}")
+            arg_parts.append(f"{{{', '.join(kw_items)}}}")
+        return f"new {func_s}({', '.join(arg_parts)})"
 
     def gen_comp_chain(self, elt: ast.Expr, clauses: list[ast.CompClause]) -> str:
         # Recursively build `.filter(...).map(...)` or `.flatMap(...)` for nested clauses
