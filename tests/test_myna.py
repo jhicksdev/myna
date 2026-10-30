@@ -225,6 +225,24 @@ class TestMynaTranspiler(unittest.TestCase):
         self.assertEqual(ns["z"], 7)
         self.assertEqual(ns["__all__"], ["exported"])
 
+    def test_hyphenated_dict_keys_require_quotes(self):
+        """`{Content-Type: ...}` is subtraction, so it must be a diagnostic (GAPS.md G5)."""
+        for src in (
+            'h = {Content-Type: "json"}',
+            'h = {k: 1, Content-Type: "json"}',
+            'h = {application/json: 1}',
+        ):
+            with self.assertRaises(ParseError, msg=src) as ctx:
+                myna_to_python(src)
+            self.assertIn("quote it", str(ctx.exception))
+
+        quoted = self.exec_myna('h = {"Content-Type": "json"}\n')
+        self.assertEqual(quoted["h"], {"Content-Type": "json"})
+
+        # A parenthesised expression is still a computed key.
+        computed = self.exec_myna("a = 5\nb = 3\nh = {(a-b): 1}\n")
+        self.assertEqual(computed["h"], {2: 1})
+
     def test_decorator_sigil_is_rejected_in_expressions(self):
         """`p(@f(2))` must not emit invalid Python for an unrecognised `@name`."""
         with self.assertRaises(ParseError) as ctx:

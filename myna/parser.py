@@ -1282,11 +1282,13 @@ class Parser:
         if self._starts_dict_entry_only():
             return self._parse_dict_entries(tok)
 
+        key_start = self.cur()
         first = self.parse_expr_stopping_at_comp_pipe()
         self.skip_seps()
 
         # Dict literal or Dict comprehension (`{k: v ...}`)
         if self.match(TT.COLON):
+            self._reject_binary_dict_key(first, parenthesized=key_start.type == TT.LPAREN)
             val = self.parse_expr_stopping_at_comp_pipe()
             self.skip_seps()
             if self.match(TT.PIPE):
@@ -1373,6 +1375,27 @@ class Parser:
         self.expect(TT.RBRACE, "'}' after dict")
         return ast.DictExpr(keys=keys, values=values, line=tok.line, col=tok.col)
 
+    def _reject_binary_dict_key(
+        self, key_expr: ast.Expr, *, parenthesized: bool = False
+    ) -> None:
+        """Catch `{Content-Type: ...}`, which parses as subtraction, not as a key.
+
+        An unquoted hyphenated (or slashed, eg `application/json`) key is a name, not
+        arithmetic; computing such a key deliberately still works as `{(a - b): ...}`.
+        """
+        if parenthesized:
+            return
+        if not isinstance(key_expr, ast.BinaryOp) or key_expr.op not in ("-", "/"):
+            return
+        if not (isinstance(key_expr.left, ast.Ident) and isinstance(key_expr.right, ast.Ident)):
+            return
+        key = f"{key_expr.left.name}{key_expr.op}{key_expr.right.name}"
+        raise ParseError(
+            f"dict key '{key}' is {('a subtraction' if key_expr.op == '-' else 'a division')}; "
+            f'quote it ("{key}") or parenthesise the expression to compute it',
+            Token(TT.IDENT, key_expr.left.name, key_expr.left.line, key_expr.left.col, ""),
+        )
+
     def _parse_single_dict_entry(self) -> tuple[Optional[ast.Expr], ast.Expr]:
         # Dict spread `**d`
         if self.match(TT.STAR_STAR):
@@ -1384,9 +1407,11 @@ class Parser:
                 ast.Literal(value=id_tok.value, kind="str", line=id_tok.line, col=id_tok.col),
                 ast.Ident(name=id_tok.value, line=id_tok.line, col=id_tok.col),
             )
+        key_start = self.cur()
         expr = self.parse_expr()
         # Key-value pair `k: v`
         if self.match(TT.COLON):
+            self._reject_binary_dict_key(expr, parenthesized=key_start.type == TT.LPAREN)
             return self._normalize_dict_key(expr), self.parse_expr()
         # Self-attribute pun `.x` -> `"x": self.x`
         if isinstance(expr, ast.SelfAttr):
