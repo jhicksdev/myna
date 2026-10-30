@@ -215,8 +215,12 @@ runs `node --check` on every generated file.
 of the JavaScript target**, not a third semantics: it uses the same helpers, the same
 Portable Core, the same `TargetError`s, and the same `@target(py, js)` contract. There is
 no `@target(ts)`; `@target(js)` blocks are emitted for TypeScript. Type annotations are
-**erased** and never add runtime checks. `myna run -t ts` is not supported in this
-release (use `-t js` to execute the same program).
+**erased** and never add runtime checks.
+
+`myna run -t ts` compiles the reachable module graph to a temporary `.mts` tree and runs it
+with Bun, or with Node >= 22.6 (Node strips the types). Generated `.mts` files import their
+siblings as `./x.mjs` by default, matching what `tsc` emits and resolves; pass
+`--module-ext .mts` when the `.mts` files are executed directly rather than compiled.
 
 Annotations become TypeScript types where Myna has them:
 

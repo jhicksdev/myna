@@ -20,7 +20,9 @@ TypeScript is a **typed projection of the JavaScript target** (`DECISIONS.md` D-
 contract and `@target(js)` blocks, and raises the same `TargetError`s. Type annotations
 are erased and never add runtime checks; unannotated parameters are emitted as explicit
 `any`. A module whose annotations are truthful type-checks under `tsc --strict`.
-`myna run -t ts` is not supported; `-t js` executes the same program.
+`myna run -t ts` compiles the reachable graph to `.mts` modules in a temporary directory
+and executes it with Bun, or with Node >= 22.6 (which strips types); its relative-import
+specifiers name `.mts` files, which Node's type stripping requires.
 
 ---
 
@@ -130,8 +132,12 @@ The TypeScript target uses the same specifiers and module graph, including `.mjs
 `.mts` output. A relative import of a `$=` type alias is emitted as `import type`, and a
 type alias is exported with `export type`; using a type alias as a value is a
 `TargetError` for `-t ts`. `myna_to_ts(source)` likewise requires `source_path=` when
-relative imports are present. `myna run -t ts` is not supported; use `-t js` to execute
-the same program.
+relative imports are present.
+
+`myna compile -t ts` derives import specifiers from `-o`: `.ts` output imports `./x.js`
+and `.mts` output imports `./x.mjs`, which is what `tsc` emits and resolves. Use
+`--module-ext .ts` (or `.mts`) when the generated files are executed directly instead of
+being compiled (`allowImportingTsExtensions` / `rewriteRelativeImportExtensions`, or Bun).
 
 ---
 

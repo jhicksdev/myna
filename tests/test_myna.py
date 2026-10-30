@@ -783,8 +783,12 @@ class TestMynaTranspiler(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            self.assertEqual(run.returncode, 1)
-            self.assertIn("compile-only", run.stderr)
+            if "needs Bun or Node" in run.stderr:
+                # No runtime that executes `.mts` on this machine.
+                self.assertEqual(run.returncode, 1)
+            else:
+                self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertNotIn("compile-only", run.stderr)
 
             source.write_text("@target(py)\nvalue = 1\n", encoding="utf-8")
             rejected = subprocess.run(

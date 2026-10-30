@@ -7,6 +7,7 @@ reuse the JavaScript cross-target corpus and only replace the compiler/runner.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -539,6 +540,48 @@ class TestMynaTypeScriptTarget(_JSTargetTests):
             )
             return js_proc.stdout.strip()
 
+    def test_run_ts_executes_the_module_graph(self):
+        """`myna run -t ts` compiles a temp `.mts` tree and runs it (GAPS.md G9)."""
+        if not shutil.which("bun") and not self._node_supports_types():
+            self.skipTest("needs Bun or Node >= 22.6 for direct .mts execution")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "util.myna").write_text(
+                "@target(py, js)\n@greet(n:s)->s => `hi {n}`\n", encoding="utf-8"
+            )
+            entry = root / "main.myna"
+            entry.write_text(
+                "@target(py, js)\n<.util:{greet}\n@main { p(greet(\"ts\")) }\n",
+                encoding="utf-8",
+            )
+            py_run = subprocess.run(
+                [sys.executable, "-m", "myna", "run", str(entry)],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            ts_run = subprocess.run(
+                [sys.executable, "-m", "myna", "run", "-t", "ts", str(entry)],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(py_run.returncode, 0, py_run.stderr)
+        self.assertEqual(ts_run.returncode, 0, ts_run.stderr)
+        self.assertEqual(ts_run.stdout, py_run.stdout)
+        self.assertEqual(ts_run.stdout.strip(), "hi ts")
+
+    @staticmethod
+    def _node_supports_types() -> bool:
+        node = shutil.which("node")
+        if not node:
+            return False
+        proc = subprocess.run(
+            [node, "--version"], capture_output=True, text=True, check=False
+        )
+        match = re.match(r"v(\d+)\.(\d+)", proc.stdout.strip())
+        return bool(match) and (int(match.group(1)), int(match.group(2))) >= (22, 6)
+
     def test_ts_new_constructs_foreign_classes(self):
         """`new C(...)` keeps working through the typed projection (GAPS.md G8)."""
         src = """
@@ -557,6 +600,42 @@ class TestMynaTypeScriptTarget(_JSTargetTests):
         @main { p(apply((a, b) => a + b, 4)) }
         """
         self.assertEqual(self.run_ts(src), "8")
+
+    def test_compile_module_ext_override(self):
+        """`.mts` output imports `.mjs` by default; `--module-ext .mts` targets direct runs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "theme.myna").write_text(
+                "@target(py, js)\n@x()->i => 1\n", encoding="utf-8"
+            )
+            (root / "main.myna").write_text(
+                "@target(py, js)\n<.theme:{x}\np(x())\n", encoding="utf-8"
+            )
+
+            def compile_with(*extra: str) -> str:
+                out = root / "main.mts"
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "myna",
+                        "compile",
+                        "-t",
+                        "ts",
+                        "-o",
+                        str(out),
+                        *extra,
+                        str(root / "main.myna"),
+                    ],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                return out.read_text(encoding="utf-8")
+
+            self.assertIn('from "./theme.mjs"', compile_with())
+            self.assertIn('from "./theme.mts"', compile_with("--module-ext", ".mts"))
 
     def test_ts_relative_imports_typecheck_and_run(self):
         with tempfile.TemporaryDirectory() as tmp:

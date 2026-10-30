@@ -13,6 +13,7 @@ from pathlib import Path
 
 import myna.ast_nodes as ast
 from myna.backends.js_gen import compile_module_js
+from myna.backends.ts_gen import compile_module_ts
 from myna.lexer import LexError
 from myna.modules import ModuleError
 from myna.parser import ParseError, parse
@@ -40,10 +41,11 @@ def _compile_module(
     *,
     module_ext: str,
     import_base: Path | None = None,
+    compiler=compile_module_js,
 ) -> tuple[str, list[Path]]:
     tree = _parse_module(path)
     try:
-        return compile_module_js(
+        return compiler(
             tree,
             source_path=path,
             module_ext=module_ext,
@@ -60,8 +62,13 @@ def collect_js_modules(
     *,
     module_root: Path | str | None = None,
     module_ext: str = ".mjs",
+    compiler=compile_module_js,
 ) -> list[JSModule]:
-    """Compile ``entry`` and every module reachable through relative imports."""
+    """Compile ``entry`` and every module reachable through relative imports.
+
+    ``compiler`` selects the target: `compile_module_js` for JavaScript (the default) or
+    `compile_module_ts` for TypeScript, whose output extension is passed as ``module_ext``.
+    """
     entry_path = Path(entry).resolve()
     root = Path(module_root).resolve() if module_root is not None else None
     pending: list[tuple[Path, Path | None]] = [(entry_path, root)]
@@ -73,7 +80,7 @@ def collect_js_modules(
         if path in seen:
             continue
         code, dependencies = _compile_module(
-            path, module_ext=module_ext, import_base=import_base
+            path, module_ext=module_ext, import_base=import_base, compiler=compiler
         )
         seen[path] = JSModule(path, code)
         order.append(path)

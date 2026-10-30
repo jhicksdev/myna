@@ -218,8 +218,11 @@ TypeScript is an **output dialect** of the JavaScript target, not a third target
 - Relative-import specifiers are `.js`/`.mjs` (the files `tsc` emits), independent of
   the `.ts`/`.mts` output extension. NodeNext, `"type": "module"` or `.mts`, and
   `@types/node` are documented requirements for direct Node execution.
-- The target is compile-only: `myna run -t ts` is rejected with an instruction to use
-  `-t js`, which executes the same program.
+- ~~The target is compile-only: `myna run -t ts` is rejected with an instruction to use
+  `-t js`, which executes the same program.~~ **Amended in 0.7.0:** `myna run -t ts`
+  compiles a temporary `.mts` tree and executes it with Bun or Node >= 22.6. An
+  emulated-Python program still differs from `-t js` only in that the types are present;
+  the specifiers name `.mts` files because Node's type stripping does not rewrite `.mjs`.
 - Class and type-alias names that TypeScript reserves for primitives (`string`,
   `number`, `any`, `unknown`, `never`, `void`, `object`, `symbol`, `bigint`, `null`,
   `undefined`) are rejected with `TargetError`; they cannot be renamed consistently

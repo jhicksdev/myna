@@ -15,6 +15,7 @@ python3 -m myna compile input.myna -t ts          # Compile Myna -> TypeScript (
 python3 -m myna decompile input.py -o output.myna # Compress Python -> Myna (-m for ultra-compact)
 python3 -m myna run script.myna                   # Execute .myna via Python
 python3 -m myna run -t js script.myna             # Execute .myna via Node.js
+python3 -m myna run -t ts script.myna             # Execute .myna via Bun/Node (TypeScript)
 python3 -m myna run --module-root . tests/run.myna  # Resolve entry relative imports from the project root
 python3 -m myna bundle script.myna -o app.py      # Bundle relative imports into one standalone Python file
 python3 -m myna bundle script.myna --zipapp -o app.pyz  # ...or a runnable, reproducible .pyz archive
@@ -37,8 +38,9 @@ A module whose annotations are truthful passes `tsc --strict`. Python `typing` n
 to TypeScript (`Callable[[i], s]` → `(arg0: number) => string`, `Mapping[K,V]` →
 `Record<K,V>`, `Sequence[T]` → `T[]`, `Awaitable[T]` → `Promise<T>`, `Self` → the
 enclosing class); user classes/aliases are not generic, so `Box[i]` becomes `Box`. There
-is no `@target(ts)`. `myna run -t ts` is compile-only in this release; use `-t js` to
-execute.
+is no `@target(ts)`. `myna run -t ts` compiles a temporary `.mts` tree and runs it with Bun
+or Node >= 22.6; `myna compile -t ts --module-ext .mts` emits `.mts` import specifiers for
+direct execution (the default `.mjs` specifiers match what `tsc` emits).
 
 ## 2. Complete Symbol Rosetta Stone
 

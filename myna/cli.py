@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from myna import (
     python_to_myna,
 )
 import myna.ast_nodes as ast
+from myna.backends.ts_gen import compile_module_ts
 from myna.bundler import BundleError, bundle, bundle_zipapp
 from myna.js_modules import collect_js_modules, write_js_tree
 from myna.loader import compile_myna_code, install
@@ -93,13 +95,22 @@ def cmd_compile(args: argparse.Namespace) -> int:
         # Relative imports become specifiers for sibling JavaScript files, so the
         # emitted extension follows the output file (Node treats `.mjs` as an ES
         # module).  TypeScript sources use the same `.js`/`.mjs` specifiers because
-        # `tsc` (NodeNext) resolves them to the generated `.ts` files.
-        module_ext = ".mjs" if output_suffix in (".mjs", ".mts") else ".js"
+        # `tsc` (NodeNext) resolves them to the generated `.ts` files. `--module-ext`
+        # overrides this for runners that need the source extension itself.
+        module_ext = args.module_ext or (
+            ".mjs" if output_suffix in (".mjs", ".mts") else ".js"
+        )
         if target == "js":
             code = myna_to_js(src, source_path=source_path, module_ext=module_ext)
         else:
             code = myna_to_ts(src, source_path=source_path, module_ext=module_ext)
     else:
+        if args.module_ext:
+            print(
+                "myna: --module-ext applies to the js and ts targets only",
+                file=sys.stderr,
+            )
+            return 1
         code = myna_to_python(src)
     if args.output:
         Path(args.output).write_text(code, encoding="utf-8")
@@ -199,16 +210,65 @@ def _run_python_entry(
     return 0
 
 
+def _node_version() -> tuple[int, int] | None:
+    if not shutil.which("node"):
+        return None
+    try:
+        proc = subprocess.run(
+            ["node", "--version"], capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return None
+    match = re.match(r"v(\d+)\.(\d+)", proc.stdout.strip())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def _ts_runtime() -> list[str]:
+    """Pick a runtime that executes `.mts` directly.
+
+    Bun strips types natively; Node does so from 22.6 (flag) and 23.0 (default).
+    """
+    bun = shutil.which("bun")
+    if bun:
+        return [bun]
+    version = _node_version()
+    if version is None:
+        raise ModuleError(
+            "`myna run -t ts` needs Bun or Node.js on PATH (for TypeScript support), "
+            "or use `myna compile -t ts` and run the output yourself"
+        )
+    if version >= (23, 0):
+        return ["node"]
+    if version >= (22, 6):
+        return ["node", "--experimental-strip-types"]
+    raise ModuleError(
+        f"`myna run -t ts` needs Node.js >= 22.6 (found {version[0]}.{version[1]}) "
+        "or Bun; alternatively use `myna compile -t ts` and run the output yourself"
+    )
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     src_path = Path(args.input)
     module_root = _module_root(args)
     if args.target == "ts":
-        print(
-            "myna: TypeScript is a compile-only target in this release; "
-            "use `myna compile -t ts`, or `myna run -t js` to execute the same program",
-            file=sys.stderr,
-        )
-        return 1
+        # TypeScript sources must be executed as `.mts` files whose imports name `.mts`:
+        # Node's type stripping does not rewrite `./x.mjs` to `x.mts`.
+        entry = src_path.resolve()
+        runtime = _ts_runtime()
+        with tempfile.TemporaryDirectory(prefix="myna-ts-") as tmp:
+            modules = collect_js_modules(
+                entry,
+                module_root=module_root,
+                module_ext=".mts",
+                compiler=compile_module_ts,
+            )
+            entry_output = write_js_tree(
+                modules, output_root=Path(tmp), module_ext=".mts"
+            )
+            proc = subprocess.run(
+                [*runtime, str(entry_output), *args.script_args], check=False
+            )
+            return proc.returncode
     if args.target == "js":
         entry = src_path.resolve()
         with tempfile.TemporaryDirectory(prefix="myna-js-") as tmp:
@@ -352,6 +412,13 @@ def main(argv: list[str] | None = None) -> int:
     p_comp.add_argument("input", help="Input .myna file (or '-' for stdin)")
     p_comp.add_argument("-o", "--output", help="Output .py, .js, or .ts file (default: stdout)")
     p_comp.add_argument("-t", "--target", choices=["py", "js", "ts"], default=None, help="Target language: 'py' (default), 'js', or 'ts'")
+    p_comp.add_argument(
+        "--module-ext",
+        choices=[".js", ".mjs", ".ts", ".mts"],
+        default=None,
+        help="Extension for relative-import specifiers in js/ts output (default: derived "
+        "from -o: .ts/.mts output imports .js/.mjs, matching tsc's emitted files)",
+    )
     p_comp.set_defaults(func=cmd_compile)
 
     p_dec = sub.add_parser("decompile", aliases=["d", "py2myna"], help="Compress Python (.py) to Myna (.myna)")
@@ -375,7 +442,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p_run = sub.add_parser("run", aliases=["r"], help="Compile and execute a .myna file directly (via Python or Node.js)")
     p_run.add_argument("input", help="Input .myna file to run")
-    p_run.add_argument("-t", "--target", choices=["py", "js", "ts"], default="py", help="Runtime target: 'py' (default) or 'js' (Node.js); 'ts' is compile-only")
+    p_run.add_argument(
+        "-t",
+        "--target",
+        choices=["py", "js", "ts"],
+        default="py",
+        help="Runtime target: 'py' (default), 'js' (Node.js), or 'ts' (Bun / Node >= 22.6 "
+        "executing the generated .mts modules)",
+    )
     p_run.add_argument(
         "--module-root",
         metavar="DIR",
